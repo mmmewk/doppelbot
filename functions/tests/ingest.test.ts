@@ -154,6 +154,27 @@ test("refresh fetches only the open month and months it hasn't seen", async () =
   expect(t.months.get("2026-09")!.fetchedAt).toBe(Date.UTC(2026, 9, 3)); // untouched
 });
 
+test("walks back only until the target game count is reached", async () => {
+  // Every archive month has 2 games. A target of 3 stops after the second month fetched.
+  const t = setup();
+  t.deps.respond = chesscomSite(["2026-06", "2026-08", "2026-10"]);
+  const wide = { ...config, maxMonths: 12, targetGames: 3 };
+  expect(await runIngest(request("chesscom"), t.deps, wide)).toBe("done");
+  expect([...t.months.keys()]).toEqual(["2026-10", "2026-08"]);
+
+  // A later refresh with a higher target refetches the open month, counts the stored final
+  // month without fetching it, and goes one month further back.
+  const later = setup({ existing: [...t.months.values()] });
+  later.deps.respond = chesscomSite(["2026-06", "2026-08", "2026-10"]);
+  expect(await runIngest(request("chesscom"), later.deps, { ...wide, targetGames: 6 })).toBe(
+    "done",
+  );
+  expect(later.requested.filter((url) => !url.endsWith("/archives"))).toEqual([
+    "https://api.chess.com/pub/player/alice/games/2026/10",
+    "https://api.chess.com/pub/player/alice/games/2026/06",
+  ]);
+});
+
 test("lichess: only months since account creation, casual games kept and flagged", async () => {
   const t = setup();
   const game = (id: string, rated: boolean) =>

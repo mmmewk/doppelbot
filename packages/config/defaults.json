@@ -17,7 +17,8 @@
     "minClockFraction": 0.1
   },
   "ingest": {
-    "maxMonths": 24,
+    "targetGames": 1000,
+    "maxMonths": 120,
     "includeCasual": true,
     "lichessMinIntervalMs": 1000,
     "chesscomMinIntervalMs": 500,

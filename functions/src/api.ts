@@ -2,7 +2,7 @@ import { resolveConfig, type Config } from "@doppelbot/config";
 import type { Site } from "@doppelbot/games";
 import type { IngestRequest } from "./ingest.ts";
 
-// POST /api/ingest   {site, username, maxMonths?}  -> 202 {jobId}   enqueue a refresh
+// POST /api/ingest   {site, username, targetGames?, maxMonths?}  -> 202 {jobId}   enqueue a refresh
 // GET  /api/ingest?site=&username=[&jobId=]        -> 200 {meta, job?}  progress and stored totals
 //
 // Public and unauthenticated: the data is public games, ingestion only ever fetches what the
@@ -61,12 +61,13 @@ export async function handleApi(request: ApiRequest, deps: ApiDeps): Promise<Api
     }
     const target = parseSiteAndUsername(body.site, body.username);
     if (typeof target === "string") return json(400, { error: target });
-    const { maxMonths } = body;
-    if (maxMonths !== undefined) {
+    const { targetGames, maxMonths } = body;
+    for (const [name, value] of Object.entries({ targetGames, maxMonths })) {
+      if (value === undefined) continue;
       try {
-        resolveConfig({ ingest: { maxMonths: maxMonths as number } });
+        resolveConfig({ ingest: { [name]: value as number } });
       } catch {
-        return json(400, { error: "maxMonths out of range" });
+        return json(400, { error: `${name} out of range` });
       }
     }
 
@@ -81,6 +82,7 @@ export async function handleApi(request: ApiRequest, deps: ApiDeps): Promise<Api
     await deps.enqueue({
       jobId,
       ...target,
+      targetGames: targetGames as number | undefined,
       maxMonths: maxMonths as number | undefined,
       attempt: 0,
     });

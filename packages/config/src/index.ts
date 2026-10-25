@@ -27,8 +27,10 @@ export const ConfigSchema = z.object({
     minClockFraction: z.number().min(0).max(1),
   }),
   ingest: z.object({
-    // How many calendar months back (including the current one) a refresh looks.
-    maxMonths: z.number().int().min(1).max(120),
+    // A refresh walks back month by month, newest first, until it has this many games in total.
+    targetGames: z.number().int().min(1).max(20_000),
+    // Hard cap on how many calendar months back (including the current one) that walk may go.
+    maxMonths: z.number().int().min(1).max(240),
     // Casual games are stored too (flagged), so evidence.weights.casual can apply at read time.
     includeCasual: z.boolean(),
     // Minimum gap between requests to each site. Lichess asks for one request at a time.
@@ -73,7 +75,8 @@ export const DEFAULT_CONFIG: Config = {
   evidence: { weights: { rated: 1, casual: 0.7, bot: 0.3 } },
   filter: { minClockSeconds: 10, minClockFraction: 0.1 },
   ingest: {
-    maxMonths: 24,
+    targetGames: 1000,
+    maxMonths: 120,
     includeCasual: true,
     lichessMinIntervalMs: 1000,
     chesscomMinIntervalMs: 500,

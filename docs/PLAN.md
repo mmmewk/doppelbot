@@ -38,7 +38,7 @@ Read this section first if you are picking up the project.
   - `packages/games`: Lichess and chess.com fetchers and parsers (matching the Python filters, plus casual games flagged `rated: false`), month logic, the position key, and the occurrence rows with their binary format. Unit tests use synthetic fixtures only.
   - `functions/`: the SQS worker (`handlers.ingest`) and a small API (`handlers.api`, `POST`/`GET /api/ingest` through the router). `ingest.ts` holds the logic behind store, blob and queue interfaces; `aws.ts` has the S3, DynamoDB and SQS implementations.
   - `infra/ingest.ts`: a FIFO queue with one message group per site, so requests to each site are sequential, plus the worker and the API function.
-  - `packages/config` gained an `ingest` block (months of history, casual games, request spacing, 429 backoff, refresh throttle).
+  - `packages/config` gained an `ingest` block (history depth as a target game count, `targetGames` 1000, capped at `maxMonths` 120; casual games, request spacing, 429 backoff, refresh throttle).
   - **Position key** (`positionKey`): the first four FEN fields (board, side to move, castling rights, en passant square), with en passant only when a capture is legal. Move counters and clocks are not in it, so transpositions merge. Occurrence rows store a 64-bit FNV-1a hash of it.
   - **Time-trouble filtering is not applied at ingest.** Rows keep the raw clock before the move and the base time, and `isTimeTrouble` applies `filter.*` at read time.
 

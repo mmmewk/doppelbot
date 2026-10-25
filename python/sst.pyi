@@ -13,6 +13,13 @@ class Resource:
     class DataBucket:
         name: str
         type: str
+    class IngestApi:
+        name: str
+        type: str
+        url: str
+    class IngestQueue:
+        type: str
+        url: str
     class ModelBucket:
         name: str
         type: str

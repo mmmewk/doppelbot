@@ -10,7 +10,8 @@ import {
   fetchLichessCreatedAt,
   fetchLichessMonth,
   gamesToJsonl,
-  missingMonths,
+  needsFetch,
+  recentMonths,
   monthOf,
   type Game,
   type MonthId,
@@ -26,7 +27,9 @@ export interface IngestRequest {
   jobId: string;
   site: Site;
   username: string;
-  /** Overrides ingest.maxMonths, e.g. to backfill further. */
+  /** Override ingest.targetGames, e.g. to backfill further. */
+  targetGames?: number;
+  /** Overrides ingest.maxMonths. */
   maxMonths?: number;
   /** How many times this job has been re-enqueued to continue after running low on time. */
   attempt: number;
@@ -66,6 +69,9 @@ export interface JobPatch {
   error?: string;
   monthsTotal?: number;
   monthsDone?: number;
+  /** Games counted towards ingest.targetGames so far, stored and newly fetched. */
+  games?: number;
+  targetGames?: number;
 }
 
 export interface IngestStore {
@@ -158,22 +164,29 @@ export async function runIngest(
       available = (month) => archives.has(month);
     }
 
-    const existing = await deps.store.listMonths(site, username);
-    const todo = missingMonths({
-      now: now(),
-      maxMonths: request.maxMonths ?? config.maxMonths,
-      ingested: new Map(existing.map((item) => [item.month, item])),
-      available,
-    });
-    await job({ monthsTotal: todo.length, monthsDone: 0 });
+    // Walk back newest first until the target game count is reached. Final months already stored
+    // count towards it without a fetch; the rest are fetched. monthsTotal is an upper bound.
+    const stored = new Map((await deps.store.listMonths(site, username)).map((m) => [m.month, m]));
+    const window = recentMonths(now(), request.maxMonths ?? config.maxMonths).filter(available);
+    const targetGames = request.targetGames ?? config.targetGames;
+    const todo = window.filter((month) => needsFetch(month, stored.get(month)?.fetchedAt));
+    let games = 0;
+    let done = 0;
+    await job({ monthsTotal: todo.length, monthsDone: 0, games, targetGames });
 
-    for (const [done, month] of todo.entries()) {
+    for (const month of window) {
+      if (games >= targetGames) break;
+      const item = stored.get(month);
+      if (item && !needsFetch(month, item.fetchedAt)) {
+        games += item.games;
+        continue;
+      }
       if (deps.deadline - now() < MIN_MONTH_BUDGET_MS) {
         return await continueLater(request, deps, summarizeNow);
       }
       try {
         const fetchedAt = now();
-        const games =
+        const fetched =
           site === "lichess"
             ? await fetchLichessMonth(http, username, month, {
                 includeCasual: config.includeCasual,
@@ -183,11 +196,9 @@ export async function runIngest(
                 includeCasual: config.includeCasual,
                 signal: signal(),
               });
-        await deps.store.putMonth(
-          site,
-          username,
-          await storeMonth(deps, site, username, month, games, fetchedAt),
-        );
+        const saved = await storeMonth(deps, site, username, month, fetched, fetchedAt);
+        await deps.store.putMonth(site, username, saved);
+        games += saved.games;
       } catch (error) {
         // Ran out of time mid-month (abort or a 429 we couldn't wait out): pick up from here later.
         if (!isOutOfTime(error)) throw error;
@@ -195,7 +206,7 @@ export async function runIngest(
         if (error instanceof HttpError) await sleep(Math.max(deps.deadline - now(), 0));
         return await continueLater(request, deps, summarizeNow);
       }
-      await job({ monthsDone: done + 1 });
+      await job({ monthsDone: ++done, games });
     }
 
     await summarizeNow();

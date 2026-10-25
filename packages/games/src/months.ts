@@ -51,7 +51,11 @@ export interface MissingMonthsInput {
 export function missingMonths(input: MissingMonthsInput): MonthId[] {
   return recentMonths(input.now, input.maxMonths).filter((month) => {
     if (input.available && !input.available(month)) return false;
-    const done = input.ingested.get(month);
-    return !done || done.fetchedAt < monthEnd(month);
+    return needsFetch(month, input.ingested.get(month)?.fetchedAt);
   });
+}
+
+/** True unless the month was fetched after it ended (`fetchedAt` in ms, undefined if never). */
+export function needsFetch(month: MonthId, fetchedAt: number | undefined): boolean {
+  return fetchedAt === undefined || fetchedAt < monthEnd(month);
 }
