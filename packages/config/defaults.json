@@ -8,13 +8,22 @@
   "evidence": {
     "weights": {
       "rated": 1,
-      "casual": 0.8,
+      "casual": 0.7,
       "bot": 0.3
     }
   },
   "filter": {
     "minClockSeconds": 10,
     "minClockFraction": 0.1
+  },
+  "ingest": {
+    "targetGames": 1000,
+    "maxMonths": 120,
+    "includeCasual": true,
+    "lichessMinIntervalMs": 1000,
+    "chesscomMinIntervalMs": 500,
+    "rateLimitBackoffSeconds": 60,
+    "minRefreshIntervalSeconds": 300
   },
   "model": {
     "id": "maia3-5m",

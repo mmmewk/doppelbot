@@ -5,14 +5,20 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import shutil
+import warnings
 from pathlib import Path
 
+import onnx
 import torch
 import torch.nn as nn
 from maia3.uci import Maia3UCIEngine, parse_args
 from maia3.utils import get_all_possible_moves
+from onnxconverter_common import float16
+from onnxruntime.quantization import QuantType, quantize_dynamic
 
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "artifacts" / "maia3-5m"
+ARTIFACTS_DIR = Path(__file__).resolve().parents[2] / "artifacts"
+PRECISIONS = ("fp16", "int8")
 
 
 class ExportableRMSNorm(nn.Module):
@@ -130,12 +136,58 @@ def export_artifacts(model_name: str, output_dir: Path, batch_size: int = 2) -> 
     return onnx_path
 
 
+def convert_fp16(source: Path, destination: Path) -> None:
+    """Store weights as fp16. The inputs and outputs stay fp32, so the TypeScript runtime is unchanged."""
+    model = onnx.load(source)
+    # The converter retypes every float tensor but leaves Cast(to=float32) alone, which breaks the attention
+    # scale computed from the tensor shape (Shape -> Cast -> Sqrt). Retarget those casts to fp16 first.
+    for node in model.graph.node:
+        if node.op_type == "Cast":
+            for attribute in node.attribute:
+                if attribute.name == "to" and attribute.i == onnx.TensorProto.FLOAT:
+                    attribute.i = onnx.TensorProto.FLOAT16
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # tiny constants (eps) round to the smallest fp16 value
+        converted = float16.convert_float_to_float16(model, keep_io_types=True, check_fp16_ready=False)
+    onnx.save(converted, destination)
+
+
+def quantize_int8(source: Path, destination: Path) -> None:
+    """Dynamic quantization: int8 weights, activations quantized at run time."""
+    quantize_dynamic(source, destination, weight_type=QuantType.QInt8)
+
+
+def export_variant(source_dir: Path, precision: str) -> Path:
+    """Write <source_dir>-<precision>/ next to an fp32 export, with identical moves.json and elo_emb.json."""
+    if precision not in PRECISIONS:
+        raise ValueError(f"precision must be one of {PRECISIONS}, got {precision!r}")
+    output_dir = source_dir.with_name(f"{source_dir.name}-{precision}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("moves.json", "elo_emb.json"):
+        shutil.copyfile(source_dir / name, output_dir / name)
+    onnx_path = output_dir / "model.onnx"
+    convert = convert_fp16 if precision == "fp16" else quantize_int8
+    convert(source_dir / "model.onnx", onnx_path)
+    return onnx_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export Maia-3 for browser inference")
     parser.add_argument("--model", default="maia3-5m")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument(
+        "--precision",
+        choices=("fp32", *PRECISIONS, "all"),
+        default="fp32",
+        help="fp16 and int8 derive from the fp32 export in --output-dir; all exports fp32 first",
+    )
     args = parser.parse_args()
-    print(export_artifacts(args.model, args.output_dir))
+    output_dir = args.output_dir or ARTIFACTS_DIR / args.model
+    if args.precision in ("fp32", "all"):
+        print(export_artifacts(args.model, output_dir))
+    for precision in PRECISIONS if args.precision == "all" else (args.precision,):
+        if precision != "fp32":
+            print(export_variant(output_dir, precision))
 
 
 if __name__ == "__main__":

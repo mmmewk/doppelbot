@@ -14,6 +14,15 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Bucket"
     }
+    "IngestApi": {
+      "name": string
+      "type": "sst.aws.Function"
+      "url": string
+    }
+    "IngestQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
     "ModelBucket": {
       "name": string
       "type": "sst.aws.Bucket"

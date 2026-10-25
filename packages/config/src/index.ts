@@ -26,6 +26,21 @@ export const ConfigSchema = z.object({
     minClockSeconds: z.number().min(0).max(600),
     minClockFraction: z.number().min(0).max(1),
   }),
+  ingest: z.object({
+    // A refresh walks back month by month, newest first, until it has this many games in total.
+    targetGames: z.number().int().min(1).max(20_000),
+    // Hard cap on how many calendar months back (including the current one) that walk may go.
+    maxMonths: z.number().int().min(1).max(240),
+    // Casual games are stored too (flagged), so evidence.weights.casual can apply at read time.
+    includeCasual: z.boolean(),
+    // Minimum gap between requests to each site. Lichess asks for one request at a time.
+    lichessMinIntervalMs: z.number().int().min(0).max(60_000),
+    chesscomMinIntervalMs: z.number().int().min(0).max(60_000),
+    // How long to wait after an HTTP 429 before retrying (Lichess asks for a full minute).
+    rateLimitBackoffSeconds: z.number().int().min(1).max(600),
+    // A profile refreshed more recently than this is not enqueued again.
+    minRefreshIntervalSeconds: z.number().int().min(0).max(86_400),
+  }),
   model: z.object({
     id: z.enum(["maia3-5m", "maia3-23m"]),
     precision: z.enum(["fp32", "fp16", "int8"]),
@@ -57,8 +72,17 @@ export type Config = z.infer<typeof ConfigSchema>;
 export const DEFAULT_CONFIG: Config = {
   recency: { halfLifeDays: 120 },
   blend: { alpha: 5 },
-  evidence: { weights: { rated: 1, casual: 0.8, bot: 0.3 } },
+  evidence: { weights: { rated: 1, casual: 0.7, bot: 0.3 } },
   filter: { minClockSeconds: 10, minClockFraction: 0.1 },
+  ingest: {
+    targetGames: 1000,
+    maxMonths: 120,
+    includeCasual: true,
+    lichessMinIntervalMs: 1000,
+    chesscomMinIntervalMs: 500,
+    rateLimitBackoffSeconds: 60,
+    minRefreshIntervalSeconds: 300,
+  },
   model: { id: "maia3-5m", precision: "fp32" },
   fit: { windowGames: 200, driftPenalty: 1, holdoutFraction: 0.2 },
   bots: {

@@ -33,6 +33,10 @@ test:
 test-browser:
     cd packages/maia && vp run test:browser
 
+# Browser throughput of fp32/fp16/int8 on WASM and WebGPU (opt-in; needs the exported variants)
+bench:
+    cd packages/maia && vp run bench
+
 # Python tests
 test-py:
     cd python && uv run pytest
@@ -47,6 +51,15 @@ build:
 # Export the Maia ONNX model, moves.json and elo_emb.json to python/artifacts/<model>
 export-model model="maia3-5m":
     cd python && uv run python -m doppelbot.export --model {{model}}
+
+# Derive the fp16 and int8 variants (python/artifacts/<model>-fp16, -int8) from the fp32 export
+export-variants model="maia3-5m":
+    cd python && uv run python -m doppelbot.export --model {{model}} --precision fp16
+    cd python && uv run python -m doppelbot.export --model {{model}} --precision int8
+
+# Compare fp16 and int8 against fp32 (top-1 agreement, KL, size); uses cached games
+precision *args:
+    cd python && uv run python -m doppelbot.precision {{args}}
 
 # Regenerate the parity fixtures from cached games
 fixtures limit="500":
