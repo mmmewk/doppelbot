@@ -305,7 +305,28 @@ on both the CloudFront distribution (response headers policy) and the Vite dev s
 
 ## Phases
 
+### Model and effort for Claude Code
+
+Each phase (and some steps within phases) lists the recommended Claude model and effort level. Prices as of 2026-10:
+
+| Model | Input / output per 1M tokens | Use for |
+|---|---|---|
+| Fable 5.1 | $10 / $50 | Escalation only: stuck on hard debugging, or research decisions that everything downstream depends on |
+| Opus 5.5 | $4 / $20 | Numerical correctness, ML methodology, algorithm design. Default effort is `medium`, so set it explicitly. |
+| Sonnet 5.5 | $2 / $10 | Scaffolding, infra, UI, porting existing code, plumbing |
+| Haiku 5.5 | $0.10 / $0.50 | Subagents for codebase search and reading, monitoring long runs, mechanical edits |
+
+Rules of thumb:
+
+- **Escalate on failure, not up front.** After two failed attempts at the same problem, raise effort one level first. If that still fails, raise the model one tier.
+- **One session per phase step.** Use this plan as the handoff document, so each session starts with a clean, small context.
+- **Plan on the stronger model, execute on the cheaper one.** Design the approach at the listed level. When most of the remaining work is mechanical, drop to Sonnet 5.5 for it.
+- **Delegate reading to cheap subagents.** Codebase sweeps and doc reading go to Haiku 5.5 (Explore) subagents.
+- **Review before closing a phase.** Run `/code-review` on Opus 5.5 `high` before a phase is marked done.
+
 ### Phase 0: Scaffold
+
+**Model:** Sonnet 5.5, `high`. SST v4 and Vite+ are newer than most training data, so expect doc lookups.
 
 - Vite+ monorepo, React TS app, and SST v4 `StaticSite` at `doppelbot.mekoppe.com`, deployed with `AWS_PROFILE=personal`.
 - DynamoDB table, data bucket, and a model bucket behind CloudFront with immutable caching.
@@ -313,6 +334,16 @@ on both the CloudFront distribution (response headers policy) and the Vite dev s
 - A `python/` uv project with maia3 (pinned to a commit) and maia2 (for the comparison).
 
 ### Phase 1: Model choice + parity (risk spike; blocks everything else)
+
+**Model, by step:**
+
+| Step | Model and effort |
+|---|---|
+| 1. Model comparison | Opus 5.5 `high` |
+| 2. Export | Opus 5.5 `xhigh` |
+| 3 to 5. Test data, TypeScript, parity tests | Opus 5.5 `high` |
+| Parity mismatch not found after two rounds | Fable 5.1 `high` |
+| 6. Size and speed | Sonnet 5.5 `high` |
 
 1. **Maia-3 vs Maia-2, in Python.** On held-out moves from real 800 to 1800 accounts, compare:
    - Maia-3 5M and 23M
@@ -335,6 +366,10 @@ on both the CloudFront distribution (response headers policy) and the Vite dev s
    second in the browser on WebGPU and WASM.
 
 ### Phase 2: Ingestion, counts, calibration
+
+**Model:**
+- Ingestion, parsers and UI: Sonnet 5.5 `medium`.
+- Position keys, recency-weighted counts, blending and L1 calibration: Opus 5.5 `high`. Subtle bugs here silently corrupt every downstream metric.
 
 - **Ingestion (SQS → Lambda):**
   - Fetch new months from Lichess (NDJSON, `clocks=true`) and chess.com (monthly archives, `%clk`).
