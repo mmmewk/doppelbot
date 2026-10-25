@@ -52,7 +52,8 @@ Read this section first if you are picking up the project.
 **Next steps, in order**
 
 1. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
-2. **Then Phase 2.**
+2. **Phase 1b: personalization spike.** This is the go/no-go for the me-bot, so it runs before any Phase 2 infra.
+3. **Then Phase 2**, in the form Phase 1b's outcome picks.
 
 **Conventions**
 
@@ -180,6 +181,7 @@ Every move the user plays is evidence, weighted by where it came from and how ol
 | Rated games (Lichess, chess.com) | 1.0            |                                                                                                     |
 | Casual games                     | 0.8            |                                                                                                     |
 | Games vs our bots                | 0.3            | They count, but less: beating a weakness against the bot takes more repetitions than in real games. |
+| Games vs our bots with hints     | 0              | Excluded: the coach helped (Phase 8).                                                               |
 
 - Moves played with under `minClockSeconds` or under `minClockFraction` of the starting clock are excluded.
   Clocks are stored raw, so this threshold is also a setting.
@@ -197,8 +199,17 @@ Results are always reported in slices:
 - **New positions**: tests the model's generalization, which is what matters for puzzles.
 - **By time control** and **by game phase**.
 
-Puzzle-relevant check: in held-out positions where the me-bot puts high probability on an eval-losing move,
-how often did the user actually play it?
+**Trainer metrics.** Log-likelihood measures fidelity overall, but the coach, Loki and the drills only need one narrower thing:
+predicting _this user's mistakes_. A mistake is a move that loses at least `coach.blunders.minLossCp` per Stockfish.
+For each held-out position, the me-bot's mistake probability is the total probability it gives to such moves.
+
+- **Finding mistakes:** AUC of that probability against whether the user actually made a mistake there.
+  Also the precision in the riskiest 10% of positions, since that is what drills and coach warnings use.
+- **Calibration:** when it predicts 30%, the user goes wrong about 30% of the time (reliability curve, ECE).
+- **Which mistake:** when the user did go wrong, the log-probability of the exact move they played.
+
+Every personalized level is compared against **L1+C**, Maia at the fitted rating plus move counts, not against L0.
+That is the product we get without personalized vectors, so it is the bar a me-bot vector has to clear.
 
 ### Experiment ladder (offline in Python first)
 
@@ -212,7 +223,7 @@ The baseline is the stated rating fed in directly.
 | L2(+C) | Free 128-d `self` vector, starting from L1                      | Adam with a penalty for drifting off the L1 point; base model frozen |
 | L3(+C) | L2 + LoRA                                                       | Adam                                                                 |
 
-Questions to answer:
+Questions to answer. Phase 1b answers 1, 3 (coarse version) and 4 (coarse version) on cached data; Phase 2b answers the rest.
 
 1. **Data needs:** how many games before each level beats the one below it? (Maia4All reports plain fine-tuning
    failing at a few hundred games. Many 800 to 1800 accounts have thousands.)
@@ -256,14 +267,18 @@ Each change between windows is split in two:
 
 A bot is one or more vectors (plus the user's move counts where relevant) and a rule for choosing moves:
 
-| Bot                        | Name   | Uses                               | Move-choice rule                                                               |
-| -------------------------- | ------ | ---------------------------------- | ------------------------------------------------------------------------------ |
-| Speed                      | Doppel | `me`                               | Sample from `P(move \| me)` at a temperature setting                           |
-| Variety                    | Zephyr | `me`, `peer = emb(user rating)`    | `P_peer / P_me`, restricted to moves within `evalMarginCp` of Stockfish's best |
-| Accuracy: traps            | Loki   | `me` (to predict the user's reply) | Plausible + sound + likely to draw a bad reply; at most `maxTrapsPerGame`      |
-| Accuracy: planted blunders | Loki   | `peer`                             | Common errors at the user's level that the user is unlikely to punish          |
-| Reference ("+100")         | –      | `me + (emb(r+100) − emb(r))`       | Diff analysis and drills                                                       |
-| Baseline                   | Maia   | `emb(user rating + stretch)`       | Unpersonalized Maia-3 (Phase 1.5)                                              |
+| Bot                        | Name   | Uses                                                          | Move-choice rule                                                                |
+| -------------------------- | ------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Speed                      | Doppel | `me`                                                          | Sample from `P(move \| me)` at a temperature setting                            |
+| Variety                    | Zephyr | `me`, `peer = emb(user rating)`                               | `P_peer / P_me`, restricted to moves within `evalMarginCp` of Stockfish's best  |
+| Accuracy: traps            | Loki   | `peer` (to find the trap), `me` (to predict the user's reply) | Plausible + sound + likely to draw a bad reply; at most `bots.traps.maxPerGame` |
+| Accuracy: planted blunders | Loki   | `peer`                                                        | Common errors at the user's level that the user is unlikely to punish           |
+| Reference ("+100")         | –      | `me + (emb(r+100) − emb(r))`                                  | Diff analysis and drills                                                        |
+| Baseline                   | Maia   | `emb(user rating + stretch)`                                  | Unpersonalized Maia-3 (Phase 1.5)                                               |
+
+**Loki only plays traps a player at your level would find**, except traps from a study the user linked (Phase 9). Every Loki move in a trap line, including setup moves, must get at least
+`bots.traps.minPeerProbability` from `peer` (Maia at the user's rating). A trap only Stockfish would find isn't one the user will
+meet in real games, so it isn't worth training against. "Sound" means Stockfish confirms the trap doesn't lose if the user answers correctly.
 
 Bots of other people (a friend, a club, any set of games) are just other players' vectors.
 
@@ -294,22 +309,30 @@ the Lambdas and Python (via an exported `defaults.json`). A settings page expose
 - **Fit-time parameters** require a refit. Fitted results are keyed by `(modelId, configHash)`, so old and new results can sit side by side.
 - **Every experiment run records the full config it used.**
 
-| Parameter                                     | Default                         | Applied                                |
-| --------------------------------------------- | ------------------------------- | -------------------------------------- |
-| `recency.halfLifeDays`                        | 120                             | Read time (counts)                     |
-| `blend.alpha`                                 | 5                               | Read time                              |
-| `evidence.weights`                            | rated 1.0, casual 0.8, bot 0.3  | Read time (counts); fit time (vectors) |
-| `filter.minClockSeconds` / `minClockFraction` | 10 / 0.10                       | Read and fit time                      |
-| `model.id` / `model.precision`                | `maia3-5m` / decided in Phase 1 | Load time                              |
-| `fit.windowGames`                             | 200                             | Fit time                               |
-| `fit.driftPenalty`                            | Tuned in Phase 2b               | Fit time                               |
-| `fit.holdoutFraction`                         | 0.2                             | Fit time                               |
-| `play.maxBotRating`                           | 2600                            | Play time                              |
-| `bots.speed.temperature`                      | 1.0                             | Play time                              |
-| `bots.variety.evalMarginCp`                   | 25                              | Play time                              |
-| `bots.traps.maxPerGame`                       | 1                               | Play time                              |
-| `drills.acceptMarginCp`                       | 30                              | Read time                              |
-| `drills.retireProbability`                    | 0.1                             | Read time                              |
+| Parameter                                     | Default                          | Applied                                |
+| --------------------------------------------- | -------------------------------- | -------------------------------------- |
+| `recency.halfLifeDays`                        | 120                              | Read time (counts)                     |
+| `blend.alpha`                                 | 5                                | Read time                              |
+| `evidence.weights`                            | rated 1.0, casual 0.8, bot 0.3   | Read time (counts); fit time (vectors) |
+| `filter.minClockSeconds` / `minClockFraction` | 10 / 0.10                        | Read and fit time                      |
+| `model.id` / `model.precision`                | `maia3-5m` / decided in Phase 1  | Load time                              |
+| `fit.windowGames`                             | 200                              | Fit time                               |
+| `fit.driftPenalty`                            | Tuned in Phase 2b                | Fit time                               |
+| `fit.holdoutFraction`                         | 0.2                              | Fit time                               |
+| `play.maxBotRating`                           | 2600                             | Play time                              |
+| `bots.speed.temperature`                      | 1.0                              | Play time                              |
+| `bots.variety.evalMarginCp`                   | 25                               | Play time                              |
+| `bots.traps.maxPerGame`                       | 1                                | Play time                              |
+| `bots.traps.minPeerProbability`               | Tuned in Phase 5                 | Play time                              |
+| `drills.acceptMarginCp`                       | 30                               | Read time                              |
+| `drills.retireProbability`                    | 0.1                              | Read time                              |
+| `coach.<kind>.enabled`                        | true (blunders, misses, threats) | Play time                              |
+| `coach.<kind>.warnBefore` / `flagAfter`       | Tuned in Phase 8                 | Play time                              |
+| `coach.blunders.minLossCp`                    | 200                              | Play time                              |
+| `coach.misses.minGainCp`                      | 200                              | Play time                              |
+| `coach.threats.minOpponentProbability`        | 0.2                              | Play time                              |
+| `coach.candidateMass` / `maxCandidates`       | 0.95 / 8                         | Play time                              |
+| `bots.custom.studyPull`                       | Tuned in Phase 9                 | Play time                              |
 
 Settings live in the browser (IndexedDB) until accounts exist. Requests for fits with non-default configs are limited to allowed ranges.
 
@@ -515,6 +538,38 @@ against. It uses no backend: no DynamoDB, SQS or Fargate, and no model training.
 Nothing here is thrown away later: Phase 2 replaces the stated rating with the calibrated (L1) one and adds the
 user's move counts, Phase 3 swaps in fitted vectors, and Phase 4 adds Stockfish and polishes this same page.
 
+### Phase 1b: Personalization spike (go/no-go for the me-bot)
+
+**Model:** Opus 5.5 `xhigh` to design the experiment and fix the criteria; Opus 5.5 `high` for the fitting and evaluation code;
+Fable 5.1 `high` to read the results and make the go/no-go call; Haiku 5.5 `low` to watch long runs.
+
+**Why now:** every trainer except Maia rests on the me-bot predicting this user's mistakes better than generic Maia.
+This tests that on the games already cached in `python/data/`, with no infra, before Phase 2 builds ingestion.
+
+**Setup:**
+
+- **Accounts:** the 20 from step 1. Fetch more months where needed, so the data-needs curve reaches a few thousand games per account.
+- **Split:** each user's most recent games are held out, as in step 1. Known and new positions are reported separately.
+- **Stockfish labels:** evaluate every held-out position and every legal move in it (`python-chess` with a local Stockfish
+  binary, fixed depth). Cache the evals by position key. They become the seed for the `POS#` cache later.
+- **Levels:** L1, L1+C, L2 and L2+C from the experiment ladder.
+  - L2 is a 128-d `self` vector fitted with Adam on the frozen 5M model, starting from the L1 point, with a drift penalty.
+  - Fit the penalty strength on a validation slice, not on the held-out games.
+- **Noise:** a bootstrap over games gives each user's confidence interval. Fitting twice on random halves of the games gives a first noise floor.
+- **Coarse theme tracking:** for each user, compare an older window with a recent one.
+  Does the change in each level's predicted mistake rate follow the change in the real rate?
+  Measure it overall, by game phase, and for "hung a piece" versus other mistakes. The full lichess-puzzler tagger waits for Phase 2b.
+
+**Criteria, fixed before running.** The numbers below are proposals; finalize them in the design session and record them here.
+
+| Outcome                                  | Condition                                                                                                                                                                  | What follows                                                                                                                                                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Go**                                   | For at least two thirds of users with enough games, L2+C beats L1+C on mistake AUC (by at least 0.02) and on which-mistake log-probability, outside the bootstrap interval | The plan as written. Phase 2b becomes refinement: LoRA, window size, full noise floor, browser fitting                                                                                                                       |
+| **Plan B** (personalization adds little) | L2+C does not clear the bar, but L1+C has mistake AUC of at least 0.70 and is reasonably calibrated                                                                        | Doppel is Maia at the fitted rating plus move counts. Drop Phase 3 (fitting service) and LoRA. Drills retire from real-game evidence (the user stops repeating the mistake in similar positions) instead of a refitted model |
+| **Rethink**                              | L1+C mistake AUC is near chance                                                                                                                                            | Human-move models can't target this user's mistakes. The coach and Loki fall back to Stockfish-only heuristics, and the product scope is revisited before Phase 2                                                            |
+
+**Done when:** the results table and the outcome are recorded in the Status section, and the Phases below are edited to match.
+
 ### Phase 2: Ingestion, counts, calibration
 
 **Model:** Sonnet 5.5 `medium` for ingestion, parsers and UI; Opus 5.5 `high` for position keys, recency-weighted counts, blending and L1 calibration (subtle bugs there silently corrupt every downstream metric).
@@ -528,19 +583,22 @@ user's move counts, Phase 3 swaps in fitted vectors, and Phase 4 adds Stockfish 
   - Run L1 calibration on the user's games.
   - Show effective rating per time control, held-out metrics, and the known/new slices.
 
-### Phase 2b: Personalization experiments
+### Phase 2b: Personalization refinement
 
 **Model:**
 
-- Experiment design and reading the results: Opus 5.5 `xhigh`. Use Fable 5.1 `high` for the final go/no-go decisions on LoRA and the noise floor.
-- Training and evaluation code: Opus 5.5 `high`.
+- Experiment design and reading the results: Opus 5.5 `xhigh`. Use Fable 5.1 `high` for the final decisions on LoRA and the noise floor.
+- Training and evaluation code: Opus 5.5 `high`, reusing the Phase 1b code.
 - Watching long runs: Haiku 5.5 `low`.
 
-Run the experiment ladder above in Python, against the data that ingestion stored in S3. Decide:
+Only runs as written if Phase 1b says **Go**. Under Plan B it shrinks to tuning counts, calibration and the drill-retirement rule.
 
-- whether LoRA is needed
+Run the rest of the experiment ladder in Python, against more accounts from the data ingestion stored in S3, scored with the trainer metrics. Decide:
+
+- whether LoRA (L3) is needed
 - the window size and default penalty strength
 - the noise floor
+- full theme tracking with the lichess-puzzler tagger (risk 7)
 - what can run in the browser
 
 ### Phase 3: Fitting service
@@ -565,7 +623,7 @@ Run the experiment ladder above in Python, against the data that ingestion store
 
 **Model:** Opus 5.5 `high` for move-scoring and trap-search algorithms; Sonnet 5.5 `medium` for bot UI and outcome logging.
 
-- Traps and planted-blunder modes.
+- Traps and planted-blunder modes. Traps are limited to those Maia at the user's rating would find (see Bots).
 - Log each outcome: fell for it, punished it, or missed it.
 
 ### Phase 6: Drill loop
@@ -583,6 +641,121 @@ Run the experiment ladder above in Python, against the data that ingestion store
 - Progression view: skill trajectory in rating points, style drift, "you play like…".
 - Lichess OAuth so games vs our bots and settings can sync and feed server fits.
 
+### Phase 8: Coach (training settings)
+
+**Model:** Opus 5.5 `high` for the risk estimates and threat classification; Sonnet 5.5 `medium` for board overlays and settings UI.
+
+**Depends on:** Phase 4 (Stockfish) and Phase 5 (bot move rules). It works with plain Maia at the user's rating as `me`, so it can be pulled forward before vectors exist.
+
+During a game against any bot, the coach estimates how likely the user is to go wrong in the current position and decides how much to help.
+It uses the me-bot's predictions, so help goes where this user actually slips.
+
+**Three kinds of mistake.** Each has its own on/off toggle and two thresholds.
+
+| Kind    | A candidate move counts when                                                                          | Risk `p` of going wrong                                    |
+| ------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Blunder | It loses at least `minLossCp` per Stockfish **and** the current opponent would punish it              | Σ over those moves of `P_me(move) · P_opp(punish \| move)` |
+| Miss    | It is within `acceptMarginCp` of best, and best beats the user's likely moves by at least `minGainCp` | 1 − Σ over those good moves of `P_me(move)`                |
+| Threat  | It leaves standing a threat the opponent already has (see below)                                      | Σ over those moves of `P_me(move) · P_opp(threat \| move)` |
+
+- All three use `p` = probability of going wrong, so the thresholds read the same way, with `warnBefore` ≥ `flagAfter`.
+  (For misses, "below threshold-1 chance of finding it" becomes `p ≥ warnBefore`.)
+  - `p ≥ warnBefore`: point it out on the board before the user moves.
+  - `flagAfter ≤ p < warnBefore`: stay quiet unless the user actually goes wrong, then flag it right after the move.
+  - `p < flagAfter`: no help. The opponent punishes a blunder; a missed chance shows up in the post-game review.
+- **"Would punish"** uses the actual opponent's move rule. Doppel, Zephyr and Maia: the probability their sampling distribution
+  gives to punishing replies (replies that keep at least `minLossCp` of the gain). Loki: 1 whenever a sound punishing reply exists.
+- **Threats (null move):** pass the turn to the opponent in the current position. A threat is an opponent move there that
+  gains at least `minLossCp` per Stockfish and that the opponent bot gives at least `coach.threats.minOpponentProbability`.
+  Then, for each likely user move, check whether the threat still works afterwards. `p` is the chance the user leaves it standing
+  and the opponent carries it out. This is the same model as blunders; only how the moves are found differs.
+  - Skip it when the user is in check, since a null move is illegal there.
+  - For the null-move pass, the opponent's history repeats the current position as its latest frame.
+  - A blunder that also matches a threat is reported as a threat, with an arrow showing what the opponent wants.
+    The remaining blunders are self-inflicted (moving a defender, hanging a piece).
+
+**On the board:**
+
+- **Before, blunder:** a red arrow on the likely blunder with what it loses ("You're likely to play this. It loses a knight.").
+  For a threat, the arrow shows the opponent's threat instead.
+- **Before, miss:** highlight only the piece, with "There's something here" and a reveal button. Showing the move gives the puzzle away.
+- **After:** name the move and the refutation (or the missed move) and offer a one-click takeback. If the user declines, play continues and the opponent punishes.
+
+**Cost per user turn:** one me-bot pass, Stockfish MultiPV on the position, then for the candidate moves covering `candidateMass` of `P_me`
+(at most `maxCandidates`), one batched opponent pass and a shallow Stockfish eval each. Start it as soon as the bot picks its move,
+during the artificial delay, so a pre-move hint is ready when the board is. Evals go through the shared `POS#` cache.
+
+**Evidence:** a game with any hint (a warning or a flag) is left out of counts and fits entirely. Bot games with no hints keep the
+normal bot weight (0.3). So the me-bot changes mainly through games against real opponents, and the coach can't make it look better than the user is.
+
+- Every warning, flag and unassisted mistake is logged with its `p` and outcome. This feeds the Phase 5 outcome log, and flagged mistakes become Phase 6 drill sources.
+- **Calibration check:** among positions where the coach predicted `p`, how often did the user actually go wrong? Shown in the debug panel. This is a cheap, live version of risk 7.
+
+**Done when:**
+
+- Each kind can be toggled and its thresholds set in settings; "Coach off" disables all three.
+- In a fixture position with a known high-probability blunder, the warning appears before the user can move.
+- Games with hints are marked as such, and a test checks they are excluded from counts.
+
+### Phase 9: Custom bots
+
+**Model:** Opus 5.5 `high` for the mixing rule and study-move classification; Sonnet 5.5 `medium` for the bot builder UI and study import.
+
+A custom bot is not a new model. It is a play-time mix of the existing move rules, so it needs no training or fitting.
+
+**Definition** (a small JSON object, validated by a schema in `packages/config`):
+
+```ts
+{ name, baseElo, weights: { doppel, zephyr, loki }, studies: string[] }
+```
+
+- **Base Elo:** the Maia component plays at `emb(baseElo)`. The personalized components shift along the rating line by the
+  same amount, `me + (emb(baseElo) − emb(userRating))`, which is the existing "+100" trick. "Doppel 100% at 1800" means "you, playing at 1800".
+- **Sliders, 0 to 100% each:** the chance a move follows that bot. Maia gets the rest, `1 − Σw`. If Σw > 1 the weights are
+  normalized and Maia gets 0. All zero is Maia at the base Elo. The builder shows the effective split.
+- **The four trainers become presets:** Doppel (100, 0, 0), Zephyr (0, 100, 0), Loki (0, 0, 100), Maia (0, 0, 0).
+  Build the Phase 4 and 5 bots on this mixer from the start, so there is one code path.
+- **Definitions are relative to whoever plays:** "Doppel" means the player's own me-bot. A bot can be shared as a link
+  (the JSON in the URL) and is stored in IndexedDB.
+
+**Mixing rule:**
+
+- Doppel, Zephyr and Maia are distributions over moves, so mixing them is `P = Σ wᵢ Pᵢ`, sampled once. Their inputs go in one
+  batched ONNX call (B = 3), so the cost is about one forward pass.
+- Loki is not a per-move distribution: it acts only when it has a trap or planted blunder. Its slider is the chance of taking
+  each opportunity when one exists. Otherwise its share falls through to the other components. `bots.traps.maxPerGame` still caps it.
+- **Commitment:** once a Loki trap or a study line is chosen, the bot follows it until it ends or the user deviates.
+  Re-rolling every move would abandon trap setups halfway.
+
+**Studies:**
+
+- **Import:** take the ID from a study URL (`lichess.org/study/{id}` or `/study/{id}/{chapterId}`) and fetch
+  `GET https://lichess.org/api/study/{id}.pgn?comments=true&variations=true`, or `/api/study/{id}/{chapterId}.pgn` for one chapter.
+  - Checked 2026-10-25: public and unlisted studies need no auth, and the response has `access-control-allow-origin: *`, so the browser can fetch it directly.
+  - Private studies need a Lichess OAuth token with `study:read`, so they wait for Phase 7 accounts.
+  - Cache each study in IndexedDB and refetch on demand. Lichess asks clients to make one request at a time.
+- **Parse** every chapter, including variations, NAGs (`?`, `??`, `!`), comments and drawn arrows (`[%cal]`), into a tree keyed by
+  position key, so transpositions merge with the user's counts. Annotator arrows and `?`/`??` marks are trap hints.
+- **Each study move for the bot gets a category:**
+  - **Played (Doppel):** the user has reached the resulting position, per their move counts.
+  - **Unexplored (Zephyr):** the user has rarely or never reached it.
+  - **Trap (Loki):** annotated as a trap or deliberate error, or found by Loki's own trap test. Annotations are hints, not truth:
+    each trap is confirmed with Stockfish (sound) and with the me-bot (the user is likely to miss it) before it is played.
+    Study traps skip Loki's plausibility check (Maia at the user's rating finding the trap): the user linked the study, so
+    they have read it and could be expected to defend against its traps.
+- **In the tree:** pick a category by the sliders, renormalized over the categories that have a move here (the Maia share picks
+  among all study moves by Maia's probabilities), then a move within it. The bot leaves the study when the user leaves it or the line ends.
+- **Out of the tree:** moves that reach a study position in one ply (by transposition) get extra weight, `bots.custom.studyPull`.
+  Deeper steering, for example into a pawn structure, is out of scope for now.
+- **Either color:** a study for the user's side tests the user's repertoire, since the bot plays the replies. A study for the bot's side works as an opening book. Both are the same tree lookup.
+- This replaces Phase 4's "optional opening book from a Lichess study PGN".
+
+**Done when:**
+
+- The builder saves, loads and shares a bot by link, and the four trainers load as presets.
+- A test with fixed weights and a fixed seed checks that move sources match the slider split over many samples.
+- With a study linked, the bot plays study moves from a study position and its category choice follows the sliders.
+
 ## Risks to verify early
 
 1. Maia-3 actually beats Maia-2 for 800 to 1800 players on their own games.
@@ -590,6 +763,8 @@ Run the experiment ladder above in Python, against the data that ingestion store
 3. Tokenization, history and move-index parity between TypeScript and Python.
 4. Model size and speed versus accuracy under fp16 and int8; in-browser throughput.
 5. Calibration and counts actually improve held-out prediction.
-6. Personalized vectors (or LoRA) beat L1+C with a realistic game count.
-7. The me-bot's per-theme mistake rate follows the user's real improvement (theme tracking). Self-retiring drills depend on this.
+6. Personalized vectors (or LoRA) beat L1+C at predicting the user's mistakes, with a realistic game count. Phase 1b tests this first; the me-bot trainers depend on it.
+7. The me-bot's per-theme mistake rate follows the user's real improvement (theme tracking). Self-retiring drills depend on this. Phase 1b gives a coarse first read; Phase 2b settles it.
 8. The noise floor is small enough that real progress is detectable at a usable window size.
+9. The coach's risk `p` is calibrated: predicted and actual mistake rates agree well enough for fixed thresholds to mean something.
+10. The coach's per-turn analysis fits inside the bot's move delay on WASM.
