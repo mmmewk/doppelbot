@@ -1,5 +1,58 @@
 # doppelbot: Plan
 
+## Status and handoff (2026-10-25)
+
+Read this section first if you are picking up the project.
+
+**Done**
+
+- **Phase 0, scaffold:**
+  - Vite+ monorepo with `apps/web` (a React placeholder) and `packages/config` (zod schema plus `defaults.json`).
+  - SST v4 infra in `sst.config.ts` and `infra/`.
+  - A Python uv project in `python/`.
+- **Phase 1, step 1: model comparison.** The code is in `python/src/doppelbot/`:
+  - `games.py`: Lichess and chess.com fetchers, cached to `python/data/`, which is gitignored.
+  - `accounts.py`: samples 20 accounts, two per 200-point band from 800 to 1800 on each site.
+  - `positions.py`: extracts the user's moves, filters out time trouble, and splits by time.
+  - `scorers.py`: batched Maia-2 and Maia-3 scoring. `tests/test_scorers.py` checks parity with each library's own inference.
+  - `compare.py`: runs the comparison. Run it with `uv run python -m doppelbot.compare`; it resumes and skips finished results.
+
+**Phase 1 step 1 results**
+
+20 accounts, 35,631 held-out moves. Each cell is mean log-likelihood per move (higher is better) / top-1 accuracy.
+
+| Variant                                                | Stated rating (L0) | Fitted offset (L1) |
+| ------------------------------------------------------ | ------------------ | ------------------ |
+| Maia-2 (blitz/rapid models)                            | −1.604 / 48.9%     | −1.589 / 49.3%     |
+| Maia-3 5M, current position repeated (library default) | −1.490 / 51.5%     | −1.461 / 52.1%     |
+| **Maia-3 5M, real 8-position history**                 | **−1.410 / 54.1%** | **−1.383 / 54.6%** |
+| Maia-3 23M, repeated (14 of 20 accounts)               | −1.516 / 51.4%     | −1.480 / 52.1%     |
+
+- **Decision: use `maia3-5m` and always feed the real 8-position history.** It beats Maia-2 in every band, site, game phase and time control.
+- **23M:** it showed no gain on partial results. The 23M + history runs were still going at handoff. Re-run `compare.py` to finish them; finished results are skipped. Check `--summary-only` before revisiting the choice.
+- **Calibration (L1):** a gain of about +0.5 points. The fitted offsets average +200 rating points, with a range of −50 to +650.
+
+**Next steps, in order**
+
+1. **Phase 1 step 2: export Maia-3 5M to ONNX.**
+   - Inputs: `tokens [B,64,97]`, `self_emb [B,128]`, `oppo_emb [B,128]`.
+   - Wrap `MAIA3Model` so `interpolate_elo` is bypassed and the embeddings come in as inputs.
+   - Export `moves.json` (from `maia3.utils.get_all_possible_moves`) and `elo_emb.json` (`elo_embedding_low` / `elo_embedding_high` weights).
+   - Check the ONNX output against PyTorch with onnxruntime in Python.
+2. **Phase 1 steps 3 to 5: TypeScript tokenization in a new `packages/maia`.** It must match `maia3.dataset.tokenize_board` and `get_historical_tokens` exactly, including:
+   - Each history frame is mirrored according to _its own_ side to move.
+   - Frames run oldest first, and short history is padded at the front with the oldest frame.
+   - Then build the legal mask and masked softmax, and add parity tests against fixtures exported from Python.
+3. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
+4. **Then Phase 2.**
+
+**Conventions**
+
+- **Checks:** `vp check` and `vp run -r test` must pass for TypeScript; `cd python && uv run pytest` for Python.
+- **Tunable values** belong in `packages/config`. After changing defaults, run `vp run @doppelbot/config#export`.
+- **Never commit game data.** Results are reported only in aggregate, by band and site.
+- **Deploy:** `AWS_PROFILE=personal vp exec sst deploy --stage production`.
+
 A web app where a player enters a Lichess and/or chess.com username. The app builds a
 model of how they play (the "me-bot" or doppelbot) on top of Maia-3. It then trains them against a
 slightly stronger version of themselves with sparring bots and drills.

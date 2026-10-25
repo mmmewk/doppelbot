@@ -4,7 +4,14 @@ version = "0.1.0"
 description = "doppelbot ML: Maia export, test data, personalization experiments"
 authors = [{ name = "Matthew Koppe", email = "matthew@ever.green" }]
 requires-python = ">=3.12"
-dependencies = ["maia2==0.11.0", "maia3", "onnx>=1.23.2", "onnxruntime>=1.31.0"]
+dependencies = [
+  "maia2==0.11.0",
+  "maia3",
+  "onnx>=1.23.2",
+  "onnxruntime>=1.31.0",
+  "requests>=2.34.2",
+  "zstandard>=0.25.0",
+]
 
 [project.scripts]
 doppelbot-smoke = "doppelbot.smoke:main"

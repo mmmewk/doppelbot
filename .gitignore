@@ -34,3 +34,6 @@ __pycache__/
 
 # maia2 downloads checkpoints into the working directory
 maia2_models/
+
+# experiment data and results (public games, kept local)
+python/data/
