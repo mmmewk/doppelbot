@@ -1,0 +1,4 @@
+{
+  "extends": "../packages/config/tsconfig.json",
+  "include": ["src", "tests", "sst-env.d.ts"]
+}

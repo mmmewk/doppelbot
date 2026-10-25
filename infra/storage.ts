@@ -5,6 +5,8 @@ export const table = new sst.aws.Dynamo("Data", {
     sk: "string",
   },
   primaryIndex: { hashKey: "pk", rangeKey: "sk" },
+  // JOB items carry an `expiresAt` (unix seconds) so finished jobs clean themselves up.
+  ttl: "expiresAt",
   deletionProtection: $app.stage === "production",
 });
 

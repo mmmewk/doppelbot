@@ -13,7 +13,7 @@ test("defaults.json is in sync (run `vp run @doppelbot/config#export`)", () => {
 
 test("overrides merge deeply", () => {
   const config = resolveConfig({ evidence: { weights: { bot: 0.5 } } });
-  expect(config.evidence.weights).toEqual({ rated: 1, casual: 0.8, bot: 0.5 });
+  expect(config.evidence.weights).toEqual({ rated: 1, casual: 0.7, bot: 0.5 });
   expect(config.recency).toEqual(DEFAULT_CONFIG.recency);
 });
 

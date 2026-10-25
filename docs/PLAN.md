@@ -34,6 +34,14 @@ Read this section first if you are picking up the project.
     - Undo, resign and playing as Black work.
 - **Phase 1, step 6: size and speed.** `doppelbot.export --precision fp16|int8` derives `python/artifacts/maia3-5m-fp16/` and `-int8/` from the fp32 export (same `moves.json` and `elo_emb.json`; `just export-variants`). `doppelbot.precision` compares them to fp32 on CPU (`just precision`). `packages/maia/tests/throughput.test.ts` is the opt-in Chromium benchmark (`just bench`). Results are below. The app still loads fp32.
 
+- **Phase 2, ingestion half: built, not yet deployed or smoke-tested on AWS.**
+  - `packages/games`: Lichess and chess.com fetchers and parsers (matching the Python filters, plus casual games flagged `rated: false`), month logic, the position key, and the occurrence rows with their binary format. Unit tests use synthetic fixtures only.
+  - `functions/`: the SQS worker (`handlers.ingest`) and a small API (`handlers.api`, `POST`/`GET /api/ingest` through the router). `ingest.ts` holds the logic behind store, blob and queue interfaces; `aws.ts` has the S3, DynamoDB and SQS implementations.
+  - `infra/ingest.ts`: a FIFO queue with one message group per site, so requests to each site are sequential, plus the worker and the API function.
+  - `packages/config` gained an `ingest` block (months of history, casual games, request spacing, 429 backoff, refresh throttle).
+  - **Position key** (`positionKey`): the first four FEN fields (board, side to move, castling rights, en passant square), with en passant only when a capture is legal. Move counters and clocks are not in it, so transpositions merge. Occurrence rows store a 64-bit FNV-1a hash of it.
+  - **Time-trouble filtering is not applied at ingest.** Rows keep the raw clock before the move and the base time, and `isTimeTrouble` applies `filter.*` at read time.
+
 **Phase 1 step 1 results**
 
 20 accounts, 35,631 held-out moves. Each cell is mean log-likelihood per move (higher is better) / top-1 accuracy.
@@ -101,8 +109,9 @@ Feasible as a background job in a worker. The `compare.py` setup (1,500 sampled 
 
 **Next steps, in order**
 
-1. **Phase 2.**
-2. **Switch the app to fp16** (see the recommendation above) when convenient: upload `maia3-5m-fp16` with `scripts/models.sh`, load it in `apps/web`, and fall back to fp32 where WebGPU lacks `shader-f16`.
+1. **Smoke test ingestion on `ingest-dev`** (`AWS_PROFILE=personal vp exec sst deploy --stage ingest-dev`), then deploy it to production.
+2. **Then the rest of Phase 2:** browser counts, L1 calibration and the held-out metrics UI.
+3. **Switch the app to fp16** (see the recommendation above) when convenient: upload `maia3-5m-fp16` with `scripts/models.sh`, load it in `apps/web`, and fall back to fp32 where WebGPU lacks `shader-f16`.
 
 **Conventions**
 
@@ -228,7 +237,7 @@ Every move the user plays is evidence, weighted by where it came from and how ol
 | Source                           | Default weight | Notes                                                                                               |
 | -------------------------------- | -------------- | --------------------------------------------------------------------------------------------------- |
 | Rated games (Lichess, chess.com) | 1.0            |                                                                                                     |
-| Casual games                     | 0.8            |                                                                                                     |
+| Casual games                     | 0.7            |                                                                                                     |
 | Games vs our bots                | 0.3            | They count, but less: beating a weakness against the bot takes more repetitions than in real games. |
 
 - Moves played with under `minClockSeconds` or under `minClockFraction` of the starting clock are excluded.
@@ -348,7 +357,7 @@ the Lambdas and Python (via an exported `defaults.json`). A settings page expose
 | --------------------------------------------- | ------------------------------- | -------------------------------------- |
 | `recency.halfLifeDays`                        | 120                             | Read time (counts)                     |
 | `blend.alpha`                                 | 5                               | Read time                              |
-| `evidence.weights`                            | rated 1.0, casual 0.8, bot 0.3  | Read time (counts); fit time (vectors) |
+| `evidence.weights`                            | rated 1.0, casual 0.7, bot 0.3  | Read time (counts); fit time (vectors) |
 | `filter.minClockSeconds` / `minClockFraction` | 10 / 0.10                       | Read and fit time                      |
 | `model.id` / `model.precision`                | `maia3-5m` / decided in Phase 1 | Load time                              |
 | `fit.windowGames`                             | 200                             | Fit time                               |
@@ -378,14 +387,19 @@ Browsers never upload derived data for a username.
 | `PLAYER#…`                 | `MONTH#<yyyy-mm>`                         | S3 key of that month's games and occurrences, fetched-at                |
 | `PLAYER#…`                 | `VEC#<modelId>#<configHash>#<windowEnd>`  | Vector (float32, base64), moves used, held-out metrics, noise radius    |
 | `PLAYER#…`                 | `LORA#<modelId>#<configHash>#<windowEnd>` | S3 key of the adapter, metrics                                          |
-| `PLAYER#…`                 | `JOB#<jobId>`                             | Ingestion or fit job status                                             |
+| `PLAYER#…`                 | `JOB#<jobId>`                             | Ingestion or fit job status (ingest jobs expire after 30 days)          |
 | `POS#<positionKey>`        | `SF#<depth>`                              | Stockfish eval and top moves. Shared across all users; openings repeat. |
 
 **S3 (data bucket):**
 
 - `games/<site>/<username>/<yyyy-mm>.jsonl.gz`: normalized games (moves, clocks, ratings, time control, result).
 - `occurrences/<site>/<username>/<yyyy-mm>.bin`: compact (positionKey, move, timestamp, source, clock) rows.
-  The browser downloads these to build move counts.
+  The browser downloads these to build move counts. The format is documented in `packages/games/src/occurrences.ts`:
+  a 16-byte header and 24-byte little-endian rows holding the 64-bit position hash, game end time, game index
+  (line in the matching games file), packed move, clock before the move, base time, ply, and flags (rated, site, speed).
+  Only the user's own moves are rows. Time-trouble moves are kept; the clock filter runs at read time.
+- Months are UTC. Lichess games belong to the month they were created in, chess.com games to the month they ended.
+  A month fetched before it ended is refetched on the next refresh, so the current month always is.
 - `adapters/…`: LoRA weights.
 
 **Browser (IndexedDB):** settings, drill and spaced-repetition state, games vs our bots, downloaded data.
