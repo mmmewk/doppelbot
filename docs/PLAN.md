@@ -26,10 +26,11 @@ Read this section first if you are picking up the project.
 | Maia-2 (blitz/rapid models)                            | −1.604 / 48.9%     | −1.589 / 49.3%     |
 | Maia-3 5M, current position repeated (library default) | −1.490 / 51.5%     | −1.461 / 52.1%     |
 | **Maia-3 5M, real 8-position history**                 | **−1.410 / 54.1%** | **−1.383 / 54.6%** |
-| Maia-3 23M, repeated (14 of 20 accounts)               | −1.516 / 51.4%     | −1.480 / 52.1%     |
+| Maia-3 23M, repeated                                   | −1.467 / 52.1%     | −1.434 / 52.8%     |
+| Maia-3 23M, real history                               | −1.382 / 54.8%     | −1.352 / 55.5%     |
 
 - **Decision: use `maia3-5m` and always feed the real 8-position history.** It beats Maia-2 in every band, site, game phase and time control.
-- **23M:** it showed no gain on partial results. The 23M + history runs were still going at handoff. Re-run `compare.py` to finish them; finished results are skipped. Check `--summary-only` before revisiting the choice.
+- **23M:** about +0.7 to +0.9 points of top-1 over 5M at roughly 4× the size. That isn't worth it for the browser, so 5M stays the default and 23M remains a quality option.
 - **Calibration (L1):** a gain of about +0.5 points. The fitted offsets average +200 rating points, with a range of −50 to +650.
 
 **Next steps, in order**
