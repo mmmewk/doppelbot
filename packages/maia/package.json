@@ -9,6 +9,7 @@
   "scripts": {
     "test": "vp test --browser.enabled false tests/index.test.ts",
     "test:browser": "vp test --browser --run tests/browser.test.ts",
+    "bench": "vp test --browser --run tests/throughput.test.ts",
     "check": "vp check"
   },
   "dependencies": {

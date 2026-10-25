@@ -32,6 +32,7 @@ Read this section first if you are picking up the project.
     - The modal rejects unknown usernames, and the profile survives a reload.
     - The rating lookup works, and Maia replies on WASM in about 20 to 90 ms.
     - Undo, resign and playing as Black work.
+- **Phase 1, step 6: size and speed.** `doppelbot.export --precision fp16|int8` derives `python/artifacts/maia3-5m-fp16/` and `-int8/` from the fp32 export (same `moves.json` and `elo_emb.json`; `just export-variants`). `doppelbot.precision` compares them to fp32 on CPU (`just precision`). `packages/maia/tests/throughput.test.ts` is the opt-in Chromium benchmark (`just bench`). Results are below. The app still loads fp32.
 
 **Phase 1 step 1 results**
 
@@ -49,14 +50,63 @@ Read this section first if you are picking up the project.
 - **23M:** about +0.7 to +0.9 points of top-1 over 5M at roughly 4× the size. That isn't worth it for the browser, so 5M stays the default and 23M remains a quality option.
 - **Calibration (L1):** a gain of about +0.5 points. The fitted offsets average +200 rating points, with a range of −50 to +650.
 
+**Phase 1 step 6 results**
+
+Accuracy against fp32 (ONNX Runtime CPU), on 1,500 fixture rows (500 positions × 3 rating pairs) and 5,000 held-out positions sampled across the 20 accounts, at the ratings recorded in each game. KL is mean KL(fp32 ‖ variant) over the legal-move distribution. Fidelity is on the held-out moves actually played: mean log-likelihood per move / top-1 (fp32: −1.3817 / 54.92%).
+
+| Variant | Size (MB) | gzip (MB) | Top-1 agreement (fixtures / held-out) | Mean KL (held-out) | Max abs prob diff | Max abs WDL diff | Held-out log-likelihood / top-1 |
+| ------- | --------- | --------- | ------------------------------------- | ------------------ | ----------------- | ---------------- | ------------------------------- |
+| fp32    | 21.3      | 19.4      | –                                     | –                  | –                 | –                | −1.3817 / 54.92%                |
+| fp16    | 10.9      | 9.7       | 99.67% / 99.72%                       | 6.4e−6             | 0.004             | 0.001            | −1.3816 / 55.00%                |
+| int8    | 6.6       | 5.3       | 97.33% / 97.82%                       | 1.1e−3             | 0.062             | 0.064            | −1.3835 / 54.96%                |
+
+- **fp16** is a full fp16 graph (weights and compute) with fp32 inputs and outputs, so the TypeScript runtime is unchanged.
+- **int8** is dynamic quantization (int8 weights, activations quantized at run time). It is good enough that static/QDQ wasn't tried. It costs about 0.002 nats per move.
+- **Converter workaround:** `onnxconverter-common` leaves `Cast(to=float32)` untouched, which breaks the attention scale computed from the tensor shape. `convert_fp16` retargets those casts to fp16 first.
+
+Browser throughput, in positions per second (median of at least 5 runs after 3 warmups, so `session.run` end to end including the fp32 tensor copy, but not tokenization or softmax). Headless Chromium 156 on an Apple M2 Pro (10 cores), served cross-origin isolated like production, so WASM used 4 threads. **WebGPU did run** (adapter `apple metal-3`, with `shader-f16`); nothing here is faked or skipped. Numbers come from a single machine and one run, so treat them as roughly ±10%.
+
+| Precision | Provider | Batch 1 | Batch 16 | Batch 64 | Batch 256 | Session create (ms) |
+| --------- | -------- | ------- | -------- | -------- | --------- | ------------------- |
+| fp32      | WASM     | 97      | 206      | 211      | 208       | 256                 |
+| fp16      | WASM     | 108     | 193      | 199      | 201       | 601                 |
+| int8      | WASM     | 126     | 202      | 208      | 204       | 221                 |
+| fp32      | WebGPU   | 114     | 393      | 455      | 459       | 263                 |
+| fp16      | WebGPU   | 55      | 295      | 616      | 877       | 238                 |
+| int8      | WebGPU   | 24      | 86       | 141      | 155       | 287                 |
+
+- **fp16 on WASM works** and gives the same outputs, but isn't faster than fp32 and takes longer to create.
+- **int8 on WebGPU** is slower than either float variant (the integer ops evidently fall back to the CPU). On WASM it only helps at batch 1.
+- **fp16 on WebGPU** is best at large batches (1.9× fp32 at 256) but slower at batch 1 (18 ms vs 9 ms). Both are fine for a single bot move.
+- **Session create** is the median of three warm creates from bytes already in memory, and it excludes download. Download dominates in production, so file size matters more: fp16 halves it.
+- **Not measured:** other GPUs and browsers, adapters without `shader-f16`, mobile, and cold-start create (first session in a page also instantiates the WASM runtime or GPU device).
+
+**Recommendation**
+
+- **Ship fp16 as the browser default**, as a single file for both providers. It halves the download (21 MB to 11 MB) with no measurable fidelity cost, and is the fastest option at the batch sizes calibration will use.
+- **Keep fp32 as the fallback** for WebGPU adapters without `shader-f16`, which is untested here.
+- **Don't ship int8:** it is slower on WebGPU, no faster on WASM at batch sizes above 1, and drops 2% top-1 agreement. Revisit only if download size becomes the bottleneck.
+- The app isn't switched yet. To do it, upload the variant with `scripts/models.sh` and pick it in `apps/web`.
+
+**In-browser L1 calibration**
+
+Each rating offset needs its own full forward pass (the rating embedding feeds the first layer), so the cost is positions × offsets. Tokenization and legal masks add about 1 ms per position (Node, measured once per position and reused across offsets).
+
+| Workload                           | Forward passes | WebGPU fp16 (877/s) | WebGPU fp32 (459/s) | WASM (~205/s) |
+| ---------------------------------- | -------------- | ------------------- | ------------------- | ------------- |
+| 5,000 moves × 20 offsets           | 100,000        | 114 s               | 218 s               | 8 min         |
+| 1,500 moves × 16 offsets (compare) | 24,000         | 27 s                | 52 s                | 2 min         |
+
+Feasible as a background job in a worker. The `compare.py` setup (1,500 sampled moves, 13 coarse offsets plus 3 fine) takes about half a minute on WebGPU and about 2 minutes on WASM, and results can be cached per account. Scoring all 5,000 moves at 20 offsets is workable on WebGPU but slow on WASM; a coarse-to-fine search on a subsample avoids it.
+
 **Next steps, in order**
 
-1. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
-2. **Then Phase 2.**
+1. **Phase 2.**
+2. **Switch the app to fp16** (see the recommendation above) when convenient: upload `maia3-5m-fp16` with `scripts/models.sh`, load it in `apps/web`, and fall back to fp32 where WebGPU lacks `shader-f16`.
 
 **Conventions**
 
-- **Checks:** `just ready` must pass. It runs `vp check`, the TypeScript tests, the Chromium browser tests, the Python tests and the web build. Run `just` to list all recipes.
+- **Checks:** `just ready` must pass. It runs `vp check`, the TypeScript tests, the Chromium browser tests, the Python tests and the web build. Run `just` to list all recipes. `just bench` (the browser throughput benchmark) is opt-in and not part of `ready`.
 - **Tunable values** belong in `packages/config`. After changing defaults, run `vp run @doppelbot/config#export`.
 - **Never commit game data.** Results are reported only in aggregate, by band and site.
 - **Deploy:** `AWS_PROFILE=personal vp exec sst deploy --stage production`.
