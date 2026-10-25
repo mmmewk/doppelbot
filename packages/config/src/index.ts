@@ -41,6 +41,9 @@ export const ConfigSchema = z.object({
     variety: z.object({ evalMarginCp: z.number().int().min(0).max(300) }),
     traps: z.object({ maxPerGame: z.number().int().min(0).max(10) }),
   }),
+  play: z.object({
+    stretchRating: z.number().int().min(-300).max(500),
+  }),
   drills: z.object({
     acceptMarginCp: z.number().int().min(0).max(300),
     retireProbability: z.number().min(0).max(1),
@@ -61,6 +64,7 @@ export const DEFAULT_CONFIG: Config = {
     variety: { evalMarginCp: 25 },
     traps: { maxPerGame: 1 },
   },
+  play: { stretchRating: 100 },
   drills: { acceptMarginCp: 30, retireProbability: 0.1 },
 };
 

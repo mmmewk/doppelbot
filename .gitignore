@@ -25,6 +25,7 @@ __pycache__/
 *.pyc
 
 # model artifacts (published to S3, not committed)
+python/artifacts/
 *.onnx
 *.pt
 *.pth

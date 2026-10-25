@@ -6,6 +6,7 @@ catalogMode: prefer
 
 catalog:
   "@types/node": ^24
+  onnxruntime-web: ^1.30.0
   sst: 4.17.2
   typescript: ^7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@0.3.2
@@ -17,3 +18,5 @@ peerDependencyRules:
     - vite
   allowedVersions:
     vite: "*"
+allowBuilds:
+  protobufjs: set this to true or false

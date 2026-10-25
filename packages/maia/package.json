@@ -1,0 +1,26 @@
+{
+  "name": "@doppelbot/maia",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vp test --browser.enabled false tests/index.test.ts",
+    "test:browser": "vp test --browser --run tests/browser.test.ts",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "onnxruntime-web": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitest/browser-playwright": "4.1.11",
+    "playwright": "^1.58.2",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

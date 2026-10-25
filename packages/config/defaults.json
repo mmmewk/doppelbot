@@ -36,6 +36,9 @@
       "maxPerGame": 1
     }
   },
+  "play": {
+    "stretchRating": 100
+  },
   "drills": {
     "acceptMarginCp": 30,
     "retireProbability": 0.1

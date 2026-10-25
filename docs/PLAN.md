@@ -16,6 +16,9 @@ Read this section first if you are picking up the project.
   - `positions.py`: extracts the user's moves, filters out time trouble, and splits by time.
   - `scorers.py`: batched Maia-2 and Maia-3 scoring. `tests/test_scorers.py` checks parity with each library's own inference.
   - `compare.py`: runs the comparison. Run it with `uv run python -m doppelbot.compare`; it resumes and skips finished results.
+- **Phase 1, step 2: ONNX export.** `doppelbot.export` exports `maia3-5m` with dynamic-batch `tokens [B,64,97]`, `self_emb [B,128]` and `oppo_emb [B,128]`, alongside `moves.json` and `elo_emb.json`. Its tests compare the explicit-embedding wrapper with native PyTorch and ONNX Runtime.
+- **Phase 1, step 3: local parity fixtures.** `doppelbot.fixtures` deterministically samples 500 cached-game positions with coverage for black turns, short histories, castling, en passant, promotions and underpromotions. It writes ignored real-game-derived fixtures to `python/data/fixtures/maia3-5m.json`, with tokens, legal masks, and top-k/WDL results at three rating pairs.
+- **Phase 1, steps 4 to 5: TypeScript and parity.** `packages/maia` mirrors Maia tokenization, mover-relative legal masks, masked softmax, WDL decoding, Elo interpolation, and ONNX session execution. Its tests match all 500 Python fixtures in Node/WASM and Chromium WASM/WebGPU within $10^{-4}$.
 
 **Phase 1 step 1 results**
 
@@ -35,17 +38,9 @@ Read this section first if you are picking up the project.
 
 **Next steps, in order**
 
-1. **Phase 1 step 2: export Maia-3 5M to ONNX.**
-   - Inputs: `tokens [B,64,97]`, `self_emb [B,128]`, `oppo_emb [B,128]`.
-   - Wrap `MAIA3Model` so `interpolate_elo` is bypassed and the embeddings come in as inputs.
-   - Export `moves.json` (from `maia3.utils.get_all_possible_moves`) and `elo_emb.json` (`elo_embedding_low` / `elo_embedding_high` weights).
-   - Check the ONNX output against PyTorch with onnxruntime in Python.
-2. **Phase 1 steps 3 to 5: TypeScript tokenization in a new `packages/maia`.** It must match `maia3.dataset.tokenize_board` and `get_historical_tokens` exactly, including:
-   - Each history frame is mirrored according to _its own_ side to move.
-   - Frames run oldest first, and short history is padded at the front with the oldest frame.
-   - Then build the legal mask and masked softmax, and add parity tests against fixtures exported from Python.
-3. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
-4. **Then Phase 2.**
+1. **Phase 1.5: play standard Maia in the browser.** This is the first thing a person can try, and it proves in-browser inference works end to end. See the Phase 1.5 section below.
+2. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
+3. **Then Phase 2.**
 
 **Conventions**
 
@@ -422,6 +417,49 @@ Rules of thumb:
    - then in the browser on WebGPU and WASM (Vitest browser mode)
 6. **Size and speed.** Compare fp16 and int8 against fp32: top-1 agreement and KL divergence. Measure positions per
    second in the browser on WebGPU and WASM.
+
+### Phase 1.5: Play standard Maia (no personalization)
+
+**Model:** Sonnet 5.5 `medium`. This is UI work on top of the parity-tested `packages/maia`.
+
+**Goal:** a deployed page where you enter a username and play a game against unpersonalized Maia-3 at your rating. It
+proves that model loading, tokenization with real history, and inference all work in a real browser. It also
+gives a baseline that the later me-bot can be compared against. It uses no backend: no DynamoDB, SQS or Fargate.
+
+- **Model hosting:**
+  - Upload `maia3-5m.onnx`, `moves.json` and `elo_emb.json` to the `ModelBucket`, served at `/models/maia3-5m/...` through the router.
+  - Add a script (for example `pnpm run upload-models`) that exports the files and runs `aws s3 sync` with `AWS_PROFILE=personal`.
+  - In dev, serve the same files from a gitignored `apps/web/public/models/`.
+  - Cache the model in the browser (Cache API) so reloads don't download it again.
+- **Rating lookup (browser only):**
+  - Lichess: `GET https://lichess.org/api/user/{username}`, reading `perfs.blitz` and `perfs.rapid`.
+  - chess.com: `GET https://api.chess.com/pub/player/{username}/stats`, reading `chess_blitz.last.rating` and `chess_rapid.last.rating`.
+  - Pick the time control with the most games. Show it, and allow a manual rating if the lookup fails.
+- **Game setup:**
+  - Bot rating = your rating + a stretch slider. The default comes from a new `play.stretchRating` setting in `packages/config`, default `+100`, range −300 to +500.
+  - The Maia inputs are `self_elo` = bot rating and `oppo_elo` = your rating.
+  - You choose white, black or random.
+- **Board:**
+  - Use `react-chessboard` with chess.js, which `packages/maia` already uses.
+  - Support legal-move highlighting, promotion choice, undo of your last move, resign, and new game.
+  - Detect game end: mate, stalemate, threefold repetition, the 50-move rule, and insufficient material.
+- **Bot moves:**
+  - Run inference in a Web Worker so the UI stays responsive.
+  - Always pass the real 8-position history from the game so far.
+  - Sample from the masked softmax, with the temperature from `packages/config` (default 1). Also offer a "top move" toggle for debugging.
+  - Add a short artificial delay (for example 300 to 800 ms) so the moves don't appear instantly.
+  - Use WebGPU when it's available, otherwise WASM. Show which one is in use.
+- **Debug panel (collapsible):**
+  - The bot's top 5 moves with their probabilities, for the current position.
+  - The WDL from the side to move's perspective.
+  - Backend, inference time in milliseconds, and the model ID.
+- **Done when:**
+  - On production (`doppelbot.mekoppe.com`), you can enter a real Lichess or chess.com username and play a full game against Maia at your rating + 100.
+  - The page shows "Cross-origin isolated: yes" and the debug panel shows the backend in use.
+  - A Vitest browser test plays a few bot moves from a fixture position and checks that each one is legal.
+
+Nothing here is thrown away later: Phase 2 replaces the stated rating with the calibrated (L1) one and adds the
+user's move counts, Phase 3 swaps in fitted vectors, and Phase 4 adds Stockfish and polishes this same page.
 
 ### Phase 2: Ingestion, counts, calibration
 
