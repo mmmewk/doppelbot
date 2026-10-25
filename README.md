@@ -1,0 +1,9 @@
+# chess-trainer
+
+Build a model of how you play chess from your Lichess / chess.com games (on top of
+[Maia-2](https://github.com/CSSLab/maia2)), then train against a slightly stronger version
+of yourself.
+
+See [docs/PLAN.md](docs/PLAN.md) for the design and roadmap.
+
+Licensed under GPL-3.0.
