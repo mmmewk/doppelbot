@@ -1,0 +1,43 @@
+{
+  "recency": {
+    "halfLifeDays": 120
+  },
+  "blend": {
+    "alpha": 5
+  },
+  "evidence": {
+    "weights": {
+      "rated": 1,
+      "casual": 0.8,
+      "bot": 0.3
+    }
+  },
+  "filter": {
+    "minClockSeconds": 10,
+    "minClockFraction": 0.1
+  },
+  "model": {
+    "id": "maia3-5m",
+    "precision": "fp32"
+  },
+  "fit": {
+    "windowGames": 200,
+    "driftPenalty": 1,
+    "holdoutFraction": 0.2
+  },
+  "bots": {
+    "speed": {
+      "temperature": 1
+    },
+    "variety": {
+      "evalMarginCp": 25
+    },
+    "traps": {
+      "maxPerGame": 1
+    }
+  },
+  "drills": {
+    "acceptMarginCp": 30,
+    "retireProbability": 0.1
+  }
+}

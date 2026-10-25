@@ -1,0 +1,20 @@
+[project]
+name = "doppelbot"
+version = "0.1.0"
+description = "doppelbot ML: Maia export, test data, personalization experiments"
+authors = [{ name = "Matthew Koppe", email = "matthew@ever.green" }]
+requires-python = ">=3.12"
+dependencies = ["maia2==0.11.0", "maia3", "onnx>=1.23.2", "onnxruntime>=1.31.0"]
+
+[project.scripts]
+doppelbot-smoke = "doppelbot.smoke:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+maia3 = { git = "https://github.com/CSSLab/maia3.git", rev = "1e13597c42d4858b7cfd7cfdae01e297263364b2" }
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]

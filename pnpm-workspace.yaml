@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalogMode: prefer
+
+catalog:
+  "@types/node": ^24
+  sst: 4.17.2
+  typescript: ^7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.2
+  vite-plus: 0.3.2
+overrides:
+  vite@*: "catalog:"
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

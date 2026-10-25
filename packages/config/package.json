@@ -1,0 +1,24 @@
+{
+  "name": "@doppelbot/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./defaults.json": "./defaults.json"
+  },
+  "scripts": {
+    "test": "vp test",
+    "check": "vp check",
+    "export": "node scripts/export-defaults.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

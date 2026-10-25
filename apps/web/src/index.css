@@ -1,0 +1,44 @@
+:root {
+  --text: #3d3a44;
+  --text-h: #08060d;
+  --bg: #fff;
+
+  font:
+    16px/1.5 system-ui,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #c4c7ce;
+    --text-h: #f3f4f6;
+    --bg: #16171d;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+h1 {
+  color: var(--text-h);
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0 0 0.75rem;
+}

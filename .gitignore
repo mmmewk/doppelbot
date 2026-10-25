@@ -1,11 +1,23 @@
-node_modules/
-dist/
-.sst/
+node_modules
+dist
+dist-ssr
+*.local
+*.log
+.DS_Store
+
+# dotenv
 .env
 .env.*
 !.env.example
-.DS_Store
-*.log
+
+# editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+
+# sst
+.sst
 
 # python
 .venv/
@@ -16,3 +28,9 @@ __pycache__/
 *.onnx
 *.pt
 *.pth
+
+# AI agent worktrees
+.claude/worktrees/
+
+# maia2 downloads checkpoints into the working directory
+maia2_models/

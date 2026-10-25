@@ -1,0 +1,27 @@
+{
+  "name": "doppelbot",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "ready": "vp check && vp run -r test && vp run -r build",
+    "dev": "sst dev",
+    "deploy": "sst deploy"
+  },
+  "devDependencies": {
+    "sst": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
