@@ -35,7 +35,7 @@ test-browser:
 
 # Python tests
 test-py:
-    cd python && uv run python -m pytest
+    cd python && uv run pytest
 
 # Everything that must pass before a phase step is marked done
 ready: check test test-browser test-py build
