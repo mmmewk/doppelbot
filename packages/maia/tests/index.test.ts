@@ -10,10 +10,32 @@ import {
   legalMovesMask,
   maskedSoftmax,
   mirrorMove,
+  rankMoves,
+  sampleMove,
   tokenizeBoard,
 } from "../src/index.ts";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+test("ranks only legal moves in real-board squares for Black", () => {
+  const moves = allPossibleMoves();
+  const index = new Map(moves.map((move, position) => [move, position]));
+  const fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+  const ranked = rankMoves(new Float32Array(moves.length), fen, moves, index);
+  expect(ranked).toHaveLength(20);
+  expect(ranked.map((item) => item.move)).toContain("e7e5");
+  expect(ranked.reduce((sum, item) => sum + item.probability, 0)).toBeCloseTo(1, 5);
+});
+
+test("samples by tempered probability and picks the top move at temperature 0", () => {
+  const ranked = [
+    { move: "e2e4", probability: 0.6 },
+    { move: "d2d4", probability: 0.4 },
+  ];
+  expect(sampleMove(ranked, 0, () => 0.99).move).toBe("e2e4");
+  expect(sampleMove(ranked, 1, () => 0.5).move).toBe("e2e4");
+  expect(sampleMove(ranked, 1, () => 0.7).move).toBe("d2d4");
+});
 
 test("tokenizes and front-pads a short history", () => {
   const frame = tokenizeBoard(START_FEN);

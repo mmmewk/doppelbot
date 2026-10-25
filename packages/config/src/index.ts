@@ -43,6 +43,8 @@ export const ConfigSchema = z.object({
   }),
   play: z.object({
     stretchRating: z.number().int().min(-300).max(500),
+    // Maia's training data thins out above this, so the bot's rating is capped here.
+    maxBotRating: z.number().int().min(1000).max(3000),
   }),
   drills: z.object({
     acceptMarginCp: z.number().int().min(0).max(300),
@@ -64,7 +66,7 @@ export const DEFAULT_CONFIG: Config = {
     variety: { evalMarginCp: 25 },
     traps: { maxPerGame: 1 },
   },
-  play: { stretchRating: 100 },
+  play: { stretchRating: 100, maxBotRating: 2600 },
   drills: { acceptMarginCp: 30, retireProbability: 0.1 },
 };
 

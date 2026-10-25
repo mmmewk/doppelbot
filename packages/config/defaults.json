@@ -37,7 +37,8 @@
     }
   },
   "play": {
-    "stretchRating": 100
+    "stretchRating": 100,
+    "maxBotRating": 2600
   },
   "drills": {
     "acceptMarginCp": 30,

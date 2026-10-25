@@ -1,10 +1,14 @@
 import { expect, test } from "vite-plus/test";
+import { Chess } from "chess.js";
 import {
   MaiaSession,
   allPossibleMoves,
   decodeWdl,
+  historicalTokens,
   interpolateElo,
   maskedSoftmax,
+  rankMoves,
+  sampleMove,
 } from "../src/index.ts";
 
 declare const __MAIA_FIXTURES_URL__: string;
@@ -87,3 +91,36 @@ test.skipIf(!("gpu" in navigator))(
     await assertParity("webgpu");
   },
 );
+
+// Start, Black to move after 1.e4, and a pawn about to promote, so both colors and promotions are covered.
+const PLAY_FENS = [
+  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+  "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+  "8/1P3k2/8/8/8/8/5K2/8 w - - 0 1",
+];
+
+test("plays legal bot moves with real history", { timeout: 120_000 }, async () => {
+  const [embeddings, modelResponse] = await Promise.all([
+    fetchLocal<{ low: number[]; high: number[] }>(__MAIA_EMBEDDINGS_URL__),
+    fetch(__MAIA_MODEL_URL__),
+  ]);
+  const session = await MaiaSession.create(new Uint8Array(await modelResponse.arrayBuffer()));
+  const moves = allPossibleMoves();
+  const indices = new Map(moves.map((move, index) => [move, index]));
+  for (const start of PLAY_FENS) {
+    const game = new Chess(start);
+    const fens = [start];
+    for (let ply = 0; ply < 6 && !game.isGameOver(); ply += 1) {
+      const output = await session.run(
+        historicalTokens(fens.slice(-8)),
+        interpolateElo(1300, embeddings),
+        interpolateElo(1200, embeddings),
+      );
+      const { move } = sampleMove(rankMoves(output.moveLogits, game.fen(), moves, indices), 1);
+      const legal = game.moves({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? ""));
+      expect(legal).toContain(move);
+      game.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] });
+      fens.push(game.fen());
+    }
+  }
+});

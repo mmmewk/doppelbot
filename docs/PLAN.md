@@ -20,6 +20,19 @@ Read this section first if you are picking up the project.
 - **Phase 1, step 3: local parity fixtures.** `doppelbot.fixtures` deterministically samples 500 cached-game positions with coverage for black turns, short histories, castling, en passant, promotions and underpromotions. It writes ignored real-game-derived fixtures to `python/data/fixtures/maia3-5m.json`, with tokens, legal masks, and top-k/WDL results at three rating pairs.
 - **Phase 1, steps 4 to 5: TypeScript and parity.** `packages/maia` mirrors Maia tokenization, mover-relative legal masks, masked softmax, WDL decoding, Elo interpolation, and ONNX session execution. Its tests match all 500 Python fixtures in Node/WASM and Chromium WASM/WebGPU within $10^{-4}$.
 
+- **Phase 1.5: done and deployed (2026-10-25).** In `apps/web`:
+  - React Router with Home and Play tabs.
+  - The landing page with the four trainers (Doppel, Zephyr, Loki, Maia) and their board lines, in `src/trainers.ts`.
+  - The profile modal, which stores usernames in `localStorage`.
+  - A Play page with rating lookup, click and drag moves, legal-move dots, promotion choice, undo, resign, game-end detection, a top-move toggle and a debug panel.
+  - `packages/maia` gained `rankMoves` and `sampleMove`. Its browser test plays bot moves from three positions and checks that each is legal.
+  - Verified on production with headless Chromium:
+    - Cross-origin isolated, and `/play` loads directly.
+    - The model is served from `/models` with immutable caching.
+    - The modal rejects unknown usernames, and the profile survives a reload.
+    - The rating lookup works, and Maia replies on WASM in about 20 to 90 ms.
+    - Undo, resign and playing as Black work.
+
 **Phase 1 step 1 results**
 
 20 accounts, 35,631 held-out moves. Each cell is mean log-likelihood per move (higher is better) / top-1 accuracy.
@@ -38,13 +51,12 @@ Read this section first if you are picking up the project.
 
 **Next steps, in order**
 
-1. **Phase 1.5: play standard Maia in the browser.** This is the first thing a person can try, and it proves in-browser inference works end to end. See the Phase 1.5 section below.
-2. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
-3. **Then Phase 2.**
+1. **Phase 1 step 6:** fp16/int8 size and accuracy, and browser throughput.
+2. **Then Phase 2.**
 
 **Conventions**
 
-- **Checks:** `vp check` and `vp run -r test` must pass for TypeScript; `cd python && uv run pytest` for Python.
+- **Checks:** `just ready` must pass. It runs `vp check`, the TypeScript tests, the Chromium browser tests, the Python tests and the web build. Run `just` to list all recipes.
 - **Tunable values** belong in `packages/config`. After changing defaults, run `vp run @doppelbot/config#export`.
 - **Never commit game data.** Results are reported only in aggregate, by band and site.
 - **Deploy:** `AWS_PROFILE=personal vp exec sst deploy --stage production`.
@@ -244,13 +256,14 @@ Each change between windows is split in two:
 
 A bot is one or more vectors (plus the user's move counts where relevant) and a rule for choosing moves:
 
-| Bot                        | Uses                               | Move-choice rule                                                               |
-| -------------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
-| Speed                      | `me`                               | Sample from `P(move \| me)` at a temperature setting                           |
-| Variety                    | `me`, `peer = emb(user rating)`    | `P_peer / P_me`, restricted to moves within `evalMarginCp` of Stockfish's best |
-| Accuracy: traps            | `me` (to predict the user's reply) | Plausible + sound + likely to draw a bad reply; at most `maxTrapsPerGame`      |
-| Accuracy: planted blunders | `peer`                             | Common errors at the user's level that the user is unlikely to punish          |
-| Reference ("+100")         | `me + (emb(r+100) − emb(r))`       | Diff analysis and drills                                                       |
+| Bot                        | Name   | Uses                               | Move-choice rule                                                               |
+| -------------------------- | ------ | ---------------------------------- | ------------------------------------------------------------------------------ |
+| Speed                      | Doppel | `me`                               | Sample from `P(move \| me)` at a temperature setting                           |
+| Variety                    | Zephyr | `me`, `peer = emb(user rating)`    | `P_peer / P_me`, restricted to moves within `evalMarginCp` of Stockfish's best |
+| Accuracy: traps            | Loki   | `me` (to predict the user's reply) | Plausible + sound + likely to draw a bad reply; at most `maxTrapsPerGame`      |
+| Accuracy: planted blunders | Loki   | `peer`                             | Common errors at the user's level that the user is unlikely to punish          |
+| Reference ("+100")         | –      | `me + (emb(r+100) − emb(r))`       | Diff analysis and drills                                                       |
+| Baseline                   | Maia   | `emb(user rating + stretch)`       | Unpersonalized Maia-3 (Phase 1.5)                                              |
 
 Bots of other people (a friend, a club, any set of games) are just other players' vectors.
 
@@ -291,6 +304,7 @@ the Lambdas and Python (via an exported `defaults.json`). A settings page expose
 | `fit.windowGames`                             | 200                             | Fit time                               |
 | `fit.driftPenalty`                            | Tuned in Phase 2b               | Fit time                               |
 | `fit.holdoutFraction`                         | 0.2                             | Fit time                               |
+| `play.maxBotRating`                           | 2600                            | Play time                              |
 | `bots.speed.temperature`                      | 1.0                             | Play time                              |
 | `bots.variety.evalMarginCp`                   | 25                              | Play time                              |
 | `bots.traps.maxPerGame`                       | 1                               | Play time                              |
@@ -422,22 +436,60 @@ Rules of thumb:
 
 **Model:** Sonnet 5.5 `medium`. This is UI work on top of the parity-tested `packages/maia`.
 
-**Goal:** a deployed page where you enter a username and play a game against unpersonalized Maia-3 at your rating. It
-proves that model loading, tokenization with real history, and inference all work in a real browser. It also
-gives a baseline that the later me-bot can be compared against. It uses no backend: no DynamoDB, SQS or Fargate.
+**Goal:** a deployed site with a landing page that explains the app and its trainers, and a play page where you
+play a game against unpersonalized Maia-3 at your rating. It proves that model loading, tokenization with real
+history, and inference all work in a real browser. It also gives a baseline that the later me-bot can be compared
+against. It uses no backend: no DynamoDB, SQS or Fargate, and no model training.
 
+- **Routing and top nav:**
+  - Two routes: Home (`/`) and Play (`/play`), using React Router in library mode.
+  - A top nav on every page with the doppelbot wordmark and Home and Play tabs. The active tab is highlighted.
+  - The `StaticSite` needs an SPA fallback so a direct load or refresh of `/play` serves `index.html`.
+- **Landing page (Home):**
+  - **Hero:** one or two sentences on what doppelbot is: personal chess trainers built from a model of how _you_ play,
+    trained on your own Lichess and chess.com games.
+  - **Four trainer cards.** Each has a name, a one-line role, a paragraph, a recommended time control and a board graphic.
+    In this phase only Maia is playable; the other three carry a "Coming soon" badge.
+
+    | Trainer    | Role               | Copy                                                                                                                                                                                                                                                                                                           | Graphic                                                                                                                                                       |
+    | ---------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+    | **Doppel** | Your doppelgänger  | Plays chess like you and prefers your openings. Excels at helping you practice the lines you already know and at improving your speed. Play at **fast** time controls to sharpen your pattern recognition.                                                                                                     | The most common London System setup: `1.d4 d5 2.Bf4 Nf6 3.e3 e6 4.Nf3 c5 5.c3 Nc6 6.Nbd2 Bd6 7.Bg3 O-O 8.Bd3`.                                                |
+    | **Zephyr** | Your companion     | Named for the Greek god of the west wind (and a dog). Follows you around but explores from a different perspective: knows the same tactics you do, and like a gentle wind blows you into new, unexpected lines. Play at **medium** time controls to practice responding when the game deviates from your plan. | An uncommon Queen's Gambit line, the Albin Countergambit: `1.d4 d5 2.c4 e5 3.dxe5 d4 4.Nf3 Nc6`.                                                              |
+    | **Loki**   | Your nemesis       | Plays the traps you are likely not to see, but also makes the blunders you are likely not to punish. Play at **longer** time controls to practice spotting the blunders and advantages you normally miss.                                                                                                      | The Blackburne Shilling Gambit smothered mate: `1.e4 e5 2.Nf3 Nc6 3.Bc4 Nd4 4.Nxe5 Qg5 5.Nxf7 Qxg2 6.Rf1 Qxe4+ 7.Be2 Nf3#`, with an arrow on the mating move. |
+    | **Maia**   | The average player | A human-like model of a typical player at a given rating, from the [Maia project](https://www.maiachess.com). Maia is the base model that Doppel, Zephyr and Loki are all built on. Playable now.                                                                                                              | The starting position, or a neutral middlegame.                                                                                                               |
+
+  - **Board graphics:** static, non-draggable `react-chessboard` boards. Each is defined as a SAN move list in one
+    `positions.ts` module and turned into a FEN with chess.js at load time, so no FEN is written by hand.
+    A unit test checks that every line is legal and that the Loki line ends in checkmate.
+  - **Footer CTA:** a "Let's get started" button at the bottom of the page that opens the profile modal.
+- **Profile modal:**
+  - Fields: chess.com username and Lichess username (at least one is required), plus an optional name. The name is used for the greeting and defaults to a username.
+  - Light validation on submit: look up each entered username (the rating endpoints below) and show an inline error if it doesn't exist.
+  - Save to `localStorage` as `doppelbot.profile` = `{ name?: string, chesscom?: string, lichess?: string, savedAt }`. Wrap every read and write in try/catch; if storage is unavailable the profile lives in memory for the session.
+  - On save, navigate to `/play`.
+  - Nothing is uploaded and no model is trained yet. The modal says so in one line.
+- **Play page:**
+  - If no profile is saved, show a short prompt with the same "Let's get started" button and modal.
+  - With a profile, greet the user by name ("Ready, {name}?"; with no name set, use the Lichess username if both are set) and start a game against Maia.
+  - An "Edit profile" link reopens the modal with the saved values.
 - **Model hosting:**
-  - Upload `maia3-5m.onnx`, `moves.json` and `elo_emb.json` to the `ModelBucket`, served at `/models/maia3-5m/...` through the router.
-  - Add a script (for example `pnpm run upload-models`) that exports the files and runs `aws s3 sync` with `AWS_PROFILE=personal`.
-  - In dev, serve the same files from a gitignored `apps/web/public/models/`.
+  - Upload `model.onnx`, `moves.json` and `elo_emb.json` to the `ModelBucket`, served at `/models/maia3-5m/...` through the router.
+  - `pnpm run upload-models` (`scripts/models.sh`) exports the files if needed and runs `aws s3 sync` with `AWS_PROFILE=personal` and immutable cache headers.
+  - In dev, a Vite middleware in `apps/web/vite.config.ts` serves the same paths straight from `python/artifacts/`. (Copying them into `public/` would also ship 21 MB in every site build.)
   - Cache the model in the browser (Cache API) so reloads don't download it again.
-- **Rating lookup (browser only):**
+- **Rating lookup (browser only, using the saved profile's usernames):**
   - Lichess: `GET https://lichess.org/api/user/{username}`, reading `perfs.blitz` and `perfs.rapid`.
   - chess.com: `GET https://api.chess.com/pub/player/{username}/stats`, reading `chess_blitz.last.rating` and `chess_rapid.last.rating`.
-  - Pick the time control with the most games. Show it, and allow a manual rating if the lookup fails.
+  - Pick the time control with the most games across both sites. Show it, and allow a manual rating if the lookup fails.
+  - Maia was trained on Lichess games, so chess.com ratings are converted to the Lichess scale (`lichessEquivalent` in `apps/web/src/ratings.ts`).
+    - The conversion uses [ChessGoals' rating comparison](https://chessgoals.com/rating-comparison/), updated July 2026, built from players with RD < 150 on both sites.
+    - Chess.com blitz maps straight to Lichess blitz, with about 50% of players within ±70.
+    - Chess.com rapid goes rapid → chess.com blitz → Lichess, because ChessGoals has no direct rapid mapping.
+    - Other sources disagree by up to about 100 points at 1200 (chess.com's own blog, Chessiro), so treat it as an estimate. Phase 2's L1 calibration replaces it with a fitted rating anyway.
 - **Game setup:**
   - Bot rating = your rating + a stretch slider. The default comes from a new `play.stretchRating` setting in `packages/config`, default `+100`, range −300 to +500.
   - The Maia inputs are `self_elo` = bot rating and `oppo_elo` = your rating.
+  - Both are capped at `play.maxBotRating` (default 2600), because Maia's training data thins out above that.
   - You choose white, black or random.
 - **Board:**
   - Use `react-chessboard` with chess.js, which `packages/maia` already uses.
@@ -454,7 +506,9 @@ gives a baseline that the later me-bot can be compared against. It uses no backe
   - The WDL from the side to move's perspective.
   - Backend, inference time in milliseconds, and the model ID.
 - **Done when:**
-  - On production (`doppelbot.mekoppe.com`), you can enter a real Lichess or chess.com username and play a full game against Maia at your rating + 100.
+  - On production (`doppelbot.mekoppe.com`), the landing page shows the four trainers with their board graphics.
+  - "Let's get started" opens the modal; saving a real Lichess and/or chess.com username lands you on Play, greeted by name, in a game against Maia at your rating + 100. A reload keeps the profile.
+  - Loading `/play` directly works.
   - The page shows "Cross-origin isolated: yes" and the debug panel shows the backend in use.
   - A Vitest browser test plays a few bot moves from a fixture position and checks that each one is legal.
 

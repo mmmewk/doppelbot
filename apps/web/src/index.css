@@ -1,7 +1,17 @@
 :root {
   --text: #3d3a44;
   --text-h: #08060d;
+  --muted: #6b6775;
   --bg: #fff;
+  --surface: #f6f5f8;
+  --border: #e2e0e7;
+  --accent: #4a6fe3;
+  --accent-text: #fff;
+  --danger: #c2413b;
+  --last-move: rgba(255, 213, 79, 0.45);
+  --selected: rgba(74, 111, 227, 0.4);
+  --target: rgba(20, 20, 30, 0.25);
+  --check: radial-gradient(circle, rgba(214, 69, 65, 0.85) 25%, transparent 80%);
 
   font:
     16px/1.5 system-ui,
@@ -17,28 +27,403 @@
   :root {
     --text: #c4c7ce;
     --text-h: #f3f4f6;
+    --muted: #8d909a;
     --bg: #16171d;
+    --surface: #1f2028;
+    --border: #2e2f39;
+    --accent: #7b96f0;
+    --accent-text: #0d0e14;
+    --danger: #ef7a73;
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg);
 }
 
-main {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-}
-
-h1 {
+h1,
+h2 {
   color: var(--text-h);
+  line-height: 1.2;
+}
+
+a {
+  color: var(--accent);
+}
+
+.muted,
+.fine-print {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Top nav */
+
+.top-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.top-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+}
+
+.wordmark {
+  color: var(--text-h);
+  font-weight: 700;
+  font-size: 1.15rem;
+  text-decoration: none;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tabs a {
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tabs a.active {
+  background: var(--surface);
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+/* Buttons and forms */
+
+.button,
+.promotion button {
+  display: inline-block;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button.secondary,
+.promotion button.secondary {
+  background: transparent;
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+input:not([type]),
+input[type="number"],
+select {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-error,
+[role="alert"] {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+/* Landing page */
+
+.home {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 1rem 4rem;
+}
+
+.hero {
+  margin-bottom: 2.5rem;
+}
+
+.hero p {
+  max-width: 44rem;
+}
+
+.hero-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  margin-bottom: 1rem;
+}
+
+.hero h1 {
+  flex: 1 1 24rem;
+  max-width: 44rem;
+  font-size: clamp(2rem, 5vw, 3rem);
+  margin: 0;
+}
+
+.lede {
+  font-size: 1.15rem;
+}
+
+.trainers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1.25rem;
+}
+
+.trainer-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.trainer-board {
+  margin: 0;
+}
+
+/* react-chessboard draws the a–h and 1–8 labels absolutely positioned; positioning the piece
+   layer too puts the labels behind the pieces. */
+[data-square] > div {
+  position: relative;
+}
+
+.credits {
+  margin-top: 2.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.trainer-body {
+  padding: 1rem 1.1rem 1.25rem;
+}
+
+.trainer-body header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.trainer-body h2 {
+  margin: 0;
+}
+
+.trainer-body p {
+  margin: 0.5rem 0;
+}
+
+.role {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.badge {
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cta {
+  margin-top: 3.5rem;
+  padding: 2.5rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--surface);
+  text-align: center;
+}
+
+.cta h2 {
+  margin-top: 0;
+}
+
+.cta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* Profile modal */
+
+.modal {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.modal::backdrop {
+  background: rgba(10, 10, 15, 0.55);
+}
+
+.modal h2 {
+  margin-top: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* Play page */
+
+.play,
+.play-empty {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.play-empty {
+  max-width: 32rem;
+  text-align: center;
+  padding-top: 4rem;
+}
+
+.play-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.play-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 52rem) {
+  .play-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.board-wrap {
+  position: relative;
+  max-width: min(40rem, calc(100vh - 8rem));
+  width: 100%;
+}
+
+.promotion {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: rgba(10, 10, 15, 0.55);
+}
+
+.promotion button {
+  min-width: 8rem;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.status {
+  margin: 0;
+  color: var(--text-h);
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+fieldset {
+  margin: 0;
+  padding: 0.75rem 1rem 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.debug summary {
+  cursor: pointer;
+  font-weight: 600;
 }
 
 dt {
   font-weight: 600;
+  font-size: 0.85rem;
 }
 
 dd {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.6rem;
+}
+
+dd ol {
+  margin: 0;
+  padding-left: 1.25rem;
 }

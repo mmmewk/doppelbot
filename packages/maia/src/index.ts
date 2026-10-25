@@ -132,6 +132,44 @@ export function maskedSoftmax(
   return probabilities;
 }
 
+export type RankedMove = { move: string; probability: number };
+
+/** Legal moves in real-board UCI with their probabilities, most likely first. */
+export function rankMoves(
+  moveLogits: ArrayLike<number>,
+  fen: string,
+  moves: readonly string[],
+  moveIndex: ReadonlyMap<string, number>,
+): RankedMove[] {
+  const probabilities = maskedSoftmax(moveLogits, legalMovesMask(fen, moveIndex));
+  // Moves are indexed from the mover's perspective; convert back to real squares when Black moves.
+  const black = fen.split(" ")[1] === "b";
+  return moves
+    .map((move, position) => ({
+      move: black ? mirrorMove(move) : move,
+      probability: probabilities[position]!,
+    }))
+    .filter((item) => item.probability > 0)
+    .sort((left, right) => right.probability - left.probability);
+}
+
+/** Sample proportionally to p^(1/temperature); temperature 0 means always the top move. */
+export function sampleMove(
+  ranked: readonly RankedMove[],
+  temperature: number,
+  random: () => number = Math.random,
+): RankedMove {
+  if (ranked.length === 0) throw new RangeError("no moves to sample from");
+  if (temperature <= 0) return ranked[0]!;
+  const weights = ranked.map((item) => item.probability ** (1 / temperature));
+  let r = random() * weights.reduce((sum, weight) => sum + weight, 0);
+  for (let i = 0; i < ranked.length; i += 1) {
+    r -= weights[i]!;
+    if (r <= 0) return ranked[i]!;
+  }
+  return ranked.at(-1)!;
+}
+
 export function decodeWdl(logits: ArrayLike<number>): Wdl {
   if (logits.length !== 3)
     throw new RangeError("WDL logits must contain loss, draw, and win values");

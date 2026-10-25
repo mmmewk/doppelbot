@@ -3,25 +3,36 @@ import ortMjs from "onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url";
 import {
   MaiaSession,
   configureWasm,
+  decodeWdl,
   historicalTokens,
   interpolateElo,
-  legalMovesMask,
-  maskedSoftmax,
-  mirrorMove,
+  rankMoves,
+  sampleMove,
 } from "@doppelbot/maia";
+import type { BotReply, BotRequest } from "./bot.ts";
 
 configureWasm({ mjs: ortMjs, wasm: ortWasm });
 
 let session: MaiaSession | undefined;
 let moves: readonly string[] = [];
+let index = new Map<string, number>();
 let embeddings: { low: number[]; high: number[] } | undefined;
 
+const MODEL_ID = "maia3-5m";
+const CACHE_NAME = `doppelbot-models-${MODEL_ID}`;
+
+/** Fetch a model file through the Cache API so reloads don't download the 21 MB model again. */
 async function load(file: string) {
-  const response = await fetch(`/models/maia3-5m/${file}`);
+  const url = `/models/${MODEL_ID}/${file}`;
+  const cache = await caches.open(CACHE_NAME).catch(() => undefined);
+  const cached = await cache?.match(url);
+  if (cached) return cached;
+  const response = await fetch(url);
   // A missing file falls through to the SPA's index.html, so check the type as well as the status.
   if (!response.ok || response.headers.get("content-type")?.includes("text/html")) {
-    throw new Error(`model file /models/maia3-5m/${file} is missing (${response.status})`);
+    throw new Error(`model file ${url} is missing (${response.status})`);
   }
+  await cache?.put(url, response.clone()).catch(() => undefined);
   return response;
 }
 
@@ -35,60 +46,38 @@ async function ready() {
     ),
   ]);
   moves = moveList;
+  index = new Map(moves.map((move, position) => [move, position]));
   embeddings = elo;
   try {
     session = await MaiaSession.create(model, "webgpu");
-    postMessage({ type: "backend", backend: "WebGPU" });
+    postMessage({ backend: "WebGPU" } satisfies BotReply);
   } catch {
     session = await MaiaSession.create(model, "wasm");
-    postMessage({ type: "backend", backend: "WASM" });
+    postMessage({ backend: "WASM" } satisfies BotReply);
   }
 }
 
-/** Sample proportionally to p^(1/temperature); temperature 0 means always the top move. */
-function sample(ranked: { move: string; probability: number }[], temperature: number) {
-  if (temperature <= 0) return ranked[0]!;
-  const weights = ranked.map((item) => item.probability ** (1 / temperature));
-  let r = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
-  for (let i = 0; i < ranked.length; i += 1) {
-    r -= weights[i]!;
-    if (r <= 0) return ranked[i]!;
-  }
-  return ranked.at(-1)!;
-}
-
-self.onmessage = async ({
-  data,
-}: MessageEvent<{ fens: string[]; selfElo: number; oppoElo: number; temperature: number }>) => {
+self.onmessage = async ({ data }: MessageEvent<BotRequest>) => {
   try {
     await ready();
     const start = performance.now();
-    const index = new Map(moves.map((move, position) => [move, position]));
     const output = await session!.run(
       historicalTokens(data.fens),
       interpolateElo(data.selfElo, embeddings!),
       interpolateElo(data.oppoElo, embeddings!),
     );
-    const probabilities = maskedSoftmax(
-      output.moveLogits,
-      legalMovesMask(data.fens.at(-1)!, index),
-    );
-    // Moves are indexed from the mover's perspective; convert back to real squares when Black moves.
-    const black = data.fens.at(-1)!.split(" ")[1] === "b";
-    const ranked = moves
-      .map((move, position) => ({
-        move: black ? mirrorMove(move) : move,
-        probability: probabilities[position]!,
-      }))
-      .filter((item) => item.probability > 0)
-      .sort((left, right) => right.probability - left.probability);
+    const ranked = rankMoves(output.moveLogits, data.fens.at(-1)!, moves, index);
     postMessage({
-      move: sample(ranked, data.temperature).move,
+      id: data.id,
+      move: sampleMove(ranked, data.temperature).move,
       top: ranked.slice(0, 5),
-      logits: Array.from(output.valueLogits),
+      wdl: decodeWdl(output.valueLogits),
       ms: performance.now() - start,
-    });
+    } satisfies BotReply);
   } catch (error) {
-    postMessage({ error: error instanceof Error ? error.message : String(error) });
+    postMessage({
+      id: data.id,
+      error: error instanceof Error ? error.message : String(error),
+    } satisfies BotReply);
   }
 };

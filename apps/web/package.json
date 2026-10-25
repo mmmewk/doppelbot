@@ -7,7 +7,8 @@
     "dev": "vp dev",
     "build": "tsc -b && vp build",
     "lint": "vp lint",
-    "preview": "vp preview"
+    "preview": "vp preview",
+    "test": "vp test src"
   },
   "dependencies": {
     "@doppelbot/config": "workspace:*",
@@ -16,7 +17,8 @@
     "onnxruntime-web": "catalog:",
     "react": "^19.3.1",
     "react-chessboard": "^5.10.0",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "react-router": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

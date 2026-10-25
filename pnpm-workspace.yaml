@@ -7,6 +7,7 @@ catalogMode: prefer
 catalog:
   "@types/node": ^24
   onnxruntime-web: ^1.30.0
+  react-router: ^7.18.4
   sst: 4.17.2
   typescript: ^7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@0.3.2
