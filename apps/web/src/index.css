@@ -232,6 +232,13 @@ input[aria-invalid="true"] {
   margin: 0;
 }
 
+/* react-chessboard gives arrows and dragged pieces high z-indexes; keep them inside the board so
+   they stay under the sticky nav. */
+.trainer-board,
+.board-wrap {
+  isolation: isolate;
+}
+
 /* react-chessboard draws the a–h and 1–8 labels absolutely positioned; positioning the piece
    layer too puts the labels behind the pieces. */
 [data-square] > div {
